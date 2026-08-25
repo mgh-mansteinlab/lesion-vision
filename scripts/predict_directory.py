@@ -14,14 +14,13 @@ overlay, and visualization triptych.
 Work is sharded one-slide-per-GPU across the available GPUs; the model is loaded
 once per worker and reused for all of that worker's samples.
 
-Optionally collects all ``*_pred.png`` masks into one folder and chains the 3D
-reconstruction pipeline when the collected stack has >= 2 sections.
+Optionally collects all ``*_pred.png`` masks into one folder with ``--collect-dir``.
 
 Examples:
     python scripts/predict_directory.py --data-dir /path/to/slides
     python scripts/predict_directory.py --data-dir /path/to/slides \
         --model models/single_scale_448/best_model.pth \
-        --collect-dir /path/to/slides/all_predictions --reconstruct
+        --collect-dir /path/to/slides/all_predictions
 """
 import os
 os.environ['OPENCV_IO_MAX_IMAGE_PIXELS'] = str(pow(2, 40))
@@ -125,8 +124,6 @@ def main():
     ap.add_argument('--no-post-process', action='store_true')
     ap.add_argument('--collect-dir', default=None,
                     help='If set, copy every *_pred.png here after prediction')
-    ap.add_argument('--reconstruct', action='store_true',
-                    help='Chain 3D reconstruction on the collected stack (implies --collect-dir)')
     args = ap.parse_args()
 
     import torch
@@ -174,25 +171,10 @@ def main():
         if s != 'OK':
             print(f"  FAILED {name}: {s}")
 
-    collect_dir = args.collect_dir
-    if args.reconstruct and not collect_dir:
-        collect_dir = os.path.join(args.data_dir, 'all_predictions')
-
-    if collect_dir:
+    if args.collect_dir:
         from scripts.collect_predictions import collect_predictions
-        n = collect_predictions(out_dir, collect_dir)
-        print(f"Collected {n} prediction mask(s) into {collect_dir}")
-
-        if args.reconstruct:
-            from src.reconstruction_3d import MIN_STACK_SIZE, ReconstructionError, run_reconstruction
-            if n < MIN_STACK_SIZE:
-                print(f"Skipping 3D: need >= {MIN_STACK_SIZE} sections, have {n}.")
-            else:
-                try:
-                    out = run_reconstruction(collect_dir)
-                    print(f"3D reconstruction complete -> {out}/model/lesion_3d_surfaces.html")
-                except ReconstructionError as e:
-                    print(f"3D reconstruction failed: {e}")
+        n = collect_predictions(out_dir, args.collect_dir)
+        print(f"Collected {n} prediction mask(s) into {args.collect_dir}")
 
 
 if __name__ == '__main__':

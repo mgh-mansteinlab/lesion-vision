@@ -2,8 +2,8 @@
 """Flatten per-sample prediction masks into a single directory.
 
 ``LesionPredictor.save_prediction`` writes each image's outputs under
-``<out>/<name>/images/<name>_pred.png``. For 3D reconstruction (and for
-sharing) it is convenient to gather every ``*_pred.png`` into one flat folder.
+``<out>/<name>/images/<name>_pred.png``. For sharing it is convenient to
+gather every ``*_pred.png`` into one flat folder.
 
 Importable:
     from scripts.collect_predictions import collect_predictions

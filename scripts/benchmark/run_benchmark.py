@@ -2,7 +2,7 @@
 """Multi-architecture benchmark over a fixed ground-truth set.
 
 Standardizes the comparison started in ``scripts/eval_all_models.py`` and adds,
-for every trained model (and optionally SAM3):
+for every trained model:
   - per-class IoU/Dice, mean IoU/Dice, lesion-only IoU/Dice, pixel accuracy
   - backbone architecture (from config.json) and parameter count (millions)
   - mean inference latency per image (seconds)

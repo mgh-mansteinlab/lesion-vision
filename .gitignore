@@ -63,8 +63,6 @@ manuscript/
 
 # Internal one-off analysis (not the public pipeline)
 scripts/analysis/
-src/fem_mushrooming/
-src/radial_mushrooming_analyzer.py
 compare_masks.py
 
 # LaTeX leftovers if any stray outside manuscript/

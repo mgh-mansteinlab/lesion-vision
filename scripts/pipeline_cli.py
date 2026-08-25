@@ -22,12 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Light-weight, torch-free helpers can be imported eagerly. The torch-backed
 # predictors are imported lazily inside their workflows to keep CLI startup fast.
-from scripts.collect_predictions import collect_predictions, find_pred_masks
-from src.reconstruction_3d import (
-    MIN_STACK_SIZE,
-    ReconstructionError,
-    run_reconstruction,
-)
+from scripts.collect_predictions import collect_predictions
 
 
 class C:
@@ -496,90 +491,10 @@ def run_predict_directory_workflow(multi_gpu: bool = False) -> int:
                 use_post_process=use_post_process,
             )
         ok("Directory prediction completed.")
-        offer_3d_chain(output_dir)
         return 0
     except Exception as exc:
         err(f"Directory prediction failed: {exc}")
         return 1
-
-
-def offer_3d_chain(masks_root: Path) -> None:
-    """After a multi-section prediction, optionally collect masks + build 3D.
-
-    3D reconstruction only makes sense for a *stack* of serial sections, so this
-    is skipped (with a note) when fewer than two prediction masks are present.
-    """
-    masks = find_pred_masks(masks_root)
-    n = len(masks)
-    if n < MIN_STACK_SIZE:
-        if n == 1:
-            info("Only one section predicted; 3D reconstruction needs a stack (>= 2). Skipping.")
-        return
-
-    print()
-    if not ask_yes_no(
-        f"Found {n} prediction masks. Collect them and build a 3D model?",
-        default=False,
-    ):
-        return
-
-    dest = masks_root / "all_predictions"
-    copied = collect_predictions(masks_root, dest)
-    ok(f"Collected {copied} mask(s) into {dest}")
-    _run_reconstruction_prompts(default_masks=dest)
-
-
-def _run_reconstruction_prompts(default_masks: Optional[Path] = None) -> int:
-    """Shared prompts + execution for the 3D reconstruction pipeline."""
-    masks_dir = ask_path(
-        "Directory of section mask PNGs (the stack)",
-        default=str(default_masks) if default_masks else None,
-        must_exist=True,
-        must_be_dir=True,
-    )
-    n_masks = len(find_pred_masks(masks_dir)) or len(list(Path(masks_dir).glob("*.png")))
-    if n_masks < MIN_STACK_SIZE:
-        err(
-            f"3D reconstruction requires >= {MIN_STACK_SIZE} section masks; "
-            f"found {n_masks} in {masks_dir}."
-        )
-        return 1
-
-    work_dir = ask_path(
-        "Output (work) directory for 3D results",
-        default=str(Path(masks_dir).parent / "recon_3d"),
-        must_be_dir=True,
-        create_if_missing=True,
-    )
-
-    samples_dir: Optional[Path] = None
-    if ask_yes_no("Provide original tissue-scan PNGs to improve registration?", default=False):
-        samples_dir = ask_path("Tissue-scan directory", must_exist=True, must_be_dir=True)
-
-    stages: Optional[List[int]] = None
-    if ask_yes_no("Run a subset of stages only (1=classify..6=snapshots)?", default=False):
-        stages = parse_int_list(ask("Stage numbers (e.g. '5 6')", default="1 3 4 5 6"))
-
-    try:
-        out = run_reconstruction(
-            masks_dir=str(masks_dir),
-            work_dir=str(work_dir),
-            samples_dir=str(samples_dir) if samples_dir else None,
-            stages=stages,
-        )
-    except ReconstructionError as exc:
-        err(str(exc))
-        return 1
-
-    html = Path(out) / "model" / "lesion_3d_surfaces.html"
-    ok(f"3D reconstruction completed. Interactive surfaces: {html}")
-    return 0
-
-
-def run_3d_reconstruction_workflow() -> int:
-    print(color("\n--- 3D Reconstruction from a Stack of Section Masks ---", C.BOLD + C.CYAN))
-    info("Requires a directory of >= 2 serial-section color masks (green/blue/red).")
-    return _run_reconstruction_prompts()
 
 
 def run_collect_predictions_workflow() -> int:
@@ -598,84 +513,6 @@ def run_collect_predictions_workflow() -> int:
     move = ask_yes_no("Move files instead of copying?", default=False)
     n = collect_predictions(src, dest, move=move)
     ok(f"Collected {n} prediction mask(s) into {dest}")
-    if n >= MIN_STACK_SIZE and ask_yes_no("Build a 3D model from these masks now?", default=False):
-        return _run_reconstruction_prompts(default_masks=Path(dest))
-    return 0
-
-
-def run_predict_sam_workflow() -> int:
-    print(color("\n--- Predict with SAM3 (Segment Anything) ---", C.BOLD + C.CYAN))
-    from src.sam_backend import SamBackendError, resolve_sam_paths, run_sam_prediction
-
-    sam_root = ask_path(
-        "SAM2LS root directory",
-        default=os.environ.get("SAM2LS_ROOT"),
-        must_exist=True,
-        must_be_dir=True,
-    )
-    checkpoint_default = str(Path(sam_root) / "exp_log" / "sam3_lesion_seg" / "checkpoints" / "checkpoint.pt")
-    checkpoint = ask_path(
-        "SAM3 checkpoint (.pt)",
-        default=checkpoint_default,
-        must_exist=True,
-        must_be_dir=False,
-    )
-
-    try:
-        resolve_sam_paths(sam_root=str(sam_root), checkpoint=str(checkpoint))
-    except SamBackendError as exc:
-        err(str(exc))
-        return 1
-
-    sam_python = ask(
-        "Python interpreter that can import sam3 (blank = current)",
-        default=os.environ.get("SAM_PYTHON", ""),
-    ).strip()
-
-    target = ask_choice("Predict a single image or a directory?", ["single", "directory"], default="single")
-    image = input_dir = None
-    if target == "single":
-        image = str(ask_path("Input image (.tif/.ndpi)", must_exist=True, must_be_dir=False))
-    else:
-        input_dir = str(ask_path("Input directory", must_exist=True, must_be_dir=True))
-
-    output_dir = ask_path(
-        "Output directory",
-        default=str(PROJECT_ROOT / "predictions" / "sam3"),
-        must_be_dir=True,
-        create_if_missing=True,
-    )
-    tile_size = ask_int("Tile size", default=448, minimum=64)
-    overlap = ask_int("Tile overlap", default=112, minimum=0)
-    device = ask("Device", default="cuda:0")
-    use_tta = ask_yes_no("Use test-time augmentation?", default=False)
-    post_process = ask_yes_no("Enable topology post-processing?", default=True)
-
-    try:
-        code = run_sam_prediction(
-            output_dir=str(output_dir),
-            image=image,
-            input_dir=input_dir,
-            checkpoint=str(checkpoint),
-            sam_root=str(sam_root),
-            python_executable=sam_python or None,
-            tile_size=tile_size,
-            overlap=overlap,
-            device=device,
-            use_tta=use_tta,
-            post_process=post_process,
-        )
-    except SamBackendError as exc:
-        err(str(exc))
-        return 1
-
-    if code != 0:
-        err(f"SAM3 prediction failed (exit {code}).")
-        return code
-
-    ok("SAM3 prediction completed.")
-    if input_dir is not None:
-        offer_3d_chain(output_dir)
     return 0
 
 
@@ -727,63 +564,6 @@ def run_benchmark_workflow() -> int:
     return run_subprocess(cmd)
 
 
-def run_fem_workflow() -> int:
-    print(color("\n--- FEM Biomechanical Mushrooming Simulation ---", C.BOLD + C.CYAN))
-    from src.fem_mushrooming import (
-        MaterialModel,
-        build_mesh,
-        load_class_mask,
-        simulate_mushrooming,
-        validate_against_observed,
-    )
-
-    mask_path = ask_path("Segmented mask PNG (green/blue/red)", must_exist=True, must_be_dir=False)
-    out_dir = ask_path(
-        "Output directory",
-        default=str(PROJECT_ROOT / "experiments" / "fem"),
-        must_be_dir=True,
-        create_if_missing=True,
-    )
-    max_cells = ask_int("Mesh resolution (cells along long side)", default=120, minimum=20)
-    stretch = ask_float("Radial stretch fraction (e.g. 0.1 = 10%)", default=0.1, minimum=0.0)
-    e_tissue = ask_float("E tissue (relative)", default=1.0, minimum=1e-6)
-    e_coag = ask_float("E coagulation (relative)", default=3.0, minimum=1e-6)
-    e_abl = ask_float("E ablation (relative)", default=0.4, minimum=1e-6)
-    nu = ask_float("Poisson ratio", default=0.45, minimum=0.0)
-
-    pixel_scale_default = 0.221 * (2 ** 2)
-    pixel_scale = ask_float("Pixel scale (um per full-res pixel)", default=pixel_scale_default, minimum=1e-6)
-
-    try:
-        class_mask = load_class_mask(str(mask_path))
-        mesh, elem_class, _small, center, orig_per_mesh = build_mesh(class_mask, max_cells=max_cells)
-        material = MaterialModel(E_tissue=e_tissue, E_coagulation=e_coag, E_ablation=e_abl, nu=nu)
-        sim = simulate_mushrooming(
-            mesh, elem_class, center,
-            material=material,
-            stretch=stretch,
-            out_dir=str(out_dir),
-            pixel_scale_um=pixel_scale * orig_per_mesh,
-        )
-        ok(f"FEM simulation completed. Figures in {out_dir}")
-    except Exception as exc:
-        err(f"FEM simulation failed: {exc}")
-        return 1
-
-    if ask_yes_no("Validate against an observed radial-CV CSV?", default=False):
-        csv_path = ask_path("Observed CV CSV (RadialMushroomingAnalyzer output)", must_exist=True, must_be_dir=False)
-        try:
-            import pandas as pd
-
-            observed = pd.read_csv(csv_path)
-            res = validate_against_observed(sim, observed, str(out_dir))
-            ok(f"Validation written: {res['png']} (Spearman r={res['spearman']:.2f})")
-        except Exception as exc:
-            err(f"Validation failed: {exc}")
-            return 1
-    return 0
-
-
 def run_compare_masks_workflow() -> int:
     print(color("\n--- Compare Predicted vs Ground Truth Masks ---", C.BOLD + C.CYAN))
     pred = ask_path("Predicted mask path (.png)", must_exist=True, must_be_dir=False)
@@ -804,35 +584,6 @@ def run_compare_masks_workflow() -> int:
         "--output_dir",
         str(out),
     ]
-    return run_subprocess(cmd)
-
-
-def run_stats_workflow() -> int:
-    print(color("\n--- Statistical Analysis Tools ---", C.BOLD + C.CYAN))
-    choice = ask_choice("Stats mode", ["demo", "bland_altman", "mixedlm"], default="demo")
-    script = str(PROJECT_ROOT / "scripts" / "analysis" / "stats_pipeline.py")
-
-    if choice == "demo":
-        return run_subprocess([sys.executable, script, "demo"])
-
-    if choice == "bland_altman":
-        csv_path = ask_path("CSV path", must_exist=True, must_be_dir=False)
-        col1 = ask("Reference column (--col1)", default="manual_um")
-        col2 = ask("Test column (--col2)", default="auto_um")
-        return run_subprocess(
-            [sys.executable, script, "bland-altman", "--csv", str(csv_path), "--col1", col1, "--col2", col2]
-        )
-
-    csv_path = ask_path("CSV path", must_exist=True, must_be_dir=False)
-    value = ask("Outcome column (--value)", default="coag_width_um")
-    group = ask("Group/fixed effect column (--group, blank for none)", default="")
-    sample_col = ask("Random intercept group column (--sample-col)", default="sample_id")
-    extras = ask("Additional formula terms (--extras, optional)", default="")
-    cmd = [sys.executable, script, "mixedlm", "--csv", str(csv_path), "--value", value, "--sample-col", sample_col]
-    if group:
-        cmd += ["--group", group]
-    if extras:
-        cmd += ["--extras", extras]
     return run_subprocess(cmd)
 
 
@@ -869,13 +620,9 @@ MENU_ACTIONS: List[tuple[str, Callable[[], int]]] = [
     ("Predict single image", run_predict_single_workflow),
     ("Predict directory (single GPU/CPU)", lambda: run_predict_directory_workflow(multi_gpu=False)),
     ("Predict directory (multi-GPU)", lambda: run_predict_directory_workflow(multi_gpu=True)),
-    ("Predict with SAM3 (Segment Anything)", run_predict_sam_workflow),
     ("Collect prediction masks into one directory", run_collect_predictions_workflow),
-    ("3D reconstruction from a stack of section masks", run_3d_reconstruction_workflow),
     ("Multi-architecture benchmark + task difficulty", run_benchmark_workflow),
-    ("FEM biomechanical mushrooming simulation", run_fem_workflow),
     ("Compare predicted vs GT masks", run_compare_masks_workflow),
-    ("Run statistics tools (demo/bland-altman/mixedlm)", run_stats_workflow),
 ]
 
 
@@ -926,13 +673,9 @@ def parse_args() -> argparse.Namespace:
             "predict_single",
             "predict_dir",
             "predict_dir_multi_gpu",
-            "predict_sam",
             "collect",
-            "reconstruct_3d",
             "benchmark",
-            "fem_simulate",
             "compare",
-            "stats",
         ],
         default="menu",
         help="Launch directly into a specific workflow mode",
@@ -956,20 +699,12 @@ def main() -> int:
         return run_predict_directory_workflow(multi_gpu=False)
     if args.mode == "predict_dir_multi_gpu":
         return run_predict_directory_workflow(multi_gpu=True)
-    if args.mode == "predict_sam":
-        return run_predict_sam_workflow()
     if args.mode == "collect":
         return run_collect_predictions_workflow()
-    if args.mode == "reconstruct_3d":
-        return run_3d_reconstruction_workflow()
     if args.mode == "benchmark":
         return run_benchmark_workflow()
-    if args.mode == "fem_simulate":
-        return run_fem_workflow()
     if args.mode == "compare":
         return run_compare_masks_workflow()
-    if args.mode == "stats":
-        return run_stats_workflow()
     return 0
 
 
