@@ -1,0 +1,21 @@
+{
+  "method": "sqrt_inv_freq",
+  "n_samples": 10000,
+  "tile_sizes": [
+    256,
+    448,
+    768
+  ],
+  "weights": [
+    2.7529,
+    1.0,
+    7.303,
+    15.1734
+  ],
+  "class_names": [
+    "background",
+    "tissue",
+    "coagulation",
+    "ablation"
+  ]
+}

@@ -1,0 +1,22 @@
+# Core (also listed in pyproject.toml)
+numpy>=1.19.0
+matplotlib>=3.3.0
+scikit-learn>=0.24.0
+opencv-python>=4.5.0
+torch>=1.9.0
+tqdm>=4.60.0
+pyyaml>=5.4.0
+albumentations>=1.0.0
+Pillow>=8.0.0
+pandas>=1.2.0
+scipy>=1.6.0
+segmentation-models-pytorch>=0.2.0
+wandb>=0.12.0
+openslide-python>=1.1.0
+openslide-bin>=4.0.0
+
+# Optional extras — install via: pip install -e ".[plots,reconstruction,fem,stats]"
+# plots: seaborn, psutil
+# reconstruction: plotly, kaleido, scikit-image
+# fem: scikit-fem
+# stats: statsmodels

@@ -1,0 +1,22 @@
+# Ablation: ReduceLROnPlateau instead of cosine+warmup.
+name: scheduler_plateau
+description: Plateau LR scheduler; warmup_epochs still passed but less meaningful for plateau.
+train:
+  backbone: tu-convnext_base
+  img_size: 512
+  tile_size: [448, 768]
+  shift_type: all
+  loss_type: compound
+  scheduler_type: plateau
+  warmup_epochs: 0
+  epochs: 10
+  batch_size: 16
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0001
+  patience: 10
+  augment: true
+  weighted_sampling: true
+  sampling_alpha: 0.85
+  activation_checkpointing: true
+  seed: 42
+  val_split: 0.2

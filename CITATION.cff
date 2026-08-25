@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: Lesion Vision
+message: >-
+  If you use this software, please cite the associated publication
+  (Automated histomorphometry of ablative fractional laser lesions enables
+  a complete-field census of geometric heterogeneity) once available, and
+  this repository.
+type: software
+authors:
+  - family-names: Quadri
+    given-names: Sarfaraz A.
+  - family-names: Marks
+    given-names: Haley L.
+  - family-names: Wang-Evers
+    given-names: Michael
+  - family-names: Manstein
+    given-names: Dieter
+repository-code: 'https://github.com/mgh-mansteinlab/lesion-vision'
+license: MIT
+keywords:
+  - ablative fractional laser
+  - histomorphometry
+  - semantic segmentation
+  - NBTC
+abstract: >-
+  Deep learning pipeline for four-class segmentation and complete-field
+  morphometry of ablative fractional laser lesions in NBTC-stained
+  horizontal whole-slide images.

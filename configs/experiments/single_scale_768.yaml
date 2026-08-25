@@ -1,0 +1,21 @@
+# Ablation: single disk tile size (768 only), same shifts as baseline.
+name: single_scale_768
+description: Ablation — remove multi-scale; only 768px tiles resized to 512.
+train:
+  backbone: tu-convnext_base
+  img_size: 512
+  tile_size: [768]
+  shift_type: all
+  loss_type: compound
+  scheduler_type: cosine
+  warmup_epochs: 2
+  epochs: 10
+  batch_size: 16
+  learning_rate: 0.0001
+  patience: 10
+  augment: true
+  weighted_sampling: true
+  sampling_alpha: 0.85
+  activation_checkpointing: true
+  seed: 42
+  val_split: 0.2

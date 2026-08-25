@@ -1,0 +1,23 @@
+# Ablation: CE path without manual/auto class reweighting (class_weights none).
+name: ce_no_class_weights
+description: Cross-entropy only, no class weighting in CE term.
+train:
+  backbone: tu-convnext_base
+  img_size: 512
+  tile_size: [448, 768]
+  shift_type: all
+  loss_type: ce
+  scheduler_type: cosine
+  warmup_epochs: 2
+  epochs: 10
+  batch_size: 16
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0001
+  patience: 10
+  augment: true
+  weighted_sampling: true
+  sampling_alpha: 0.85
+  activation_checkpointing: true
+  seed: 42
+  val_split: 0.2
+  class_weights: none

@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lesion-vision"
+version = "0.1.0"
+description = "Lesion Vision: AFL lesion segmentation, WSI tiling, inference, and quantitative histology analytics"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Sarfaraz A. Quadri" },
+]
+dependencies = [
+  "numpy>=1.19.0",
+  "matplotlib>=3.3.0",
+  "scikit-learn>=0.24.0",
+  "opencv-python>=4.5.0",
+  "torch>=1.9.0",
+  "tqdm>=4.60.0",
+  "pyyaml>=5.4.0",
+  "albumentations>=1.0.0",
+  "Pillow>=8.0.0",
+  "pandas>=1.2.0",
+  "scipy>=1.6.0",
+  "segmentation-models-pytorch>=0.2.0",
+  "wandb>=0.12.0",
+  "openslide-python>=1.1.0",
+  "openslide-bin>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "ruff>=0.4.0",
+]
+plots = [
+  "seaborn>=0.12.0",
+  "psutil>=5.0.0",
+]
+reconstruction = [
+  "plotly>=6.0.0",
+  "kaleido>=0.2.1",
+  "scikit-image>=0.17.2",
+]
+fem = [
+  "scikit-fem>=8.0.0",
+]
+stats = [
+  "statsmodels>=0.14.0",
+]
+all = [
+  "seaborn>=0.12.0",
+  "psutil>=5.0.0",
+  "plotly>=6.0.0",
+  "kaleido>=0.2.1",
+  "scikit-image>=0.17.2",
+  "scikit-fem>=8.0.0",
+  "statsmodels>=0.14.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

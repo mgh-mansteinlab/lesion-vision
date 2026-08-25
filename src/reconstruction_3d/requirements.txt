@@ -1,0 +1,4 @@
+# Optional 3D extras. Prefer: pip install -e ".[reconstruction]"
+plotly>=6.0.0
+kaleido>=0.2.1
+scikit-image>=0.17.2

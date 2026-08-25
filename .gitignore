@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Secrets / machine-specific
+.env
+.env.local
+**/wandb-metadata.json
+wandb/
+
+# Checkpoints — provided on request (see models/DATA_ON_REQUEST.txt)
+*.pth
+*.pt
+*.ckpt
+models/*
+!models/DATA_ON_REQUEST.txt
+!models/CHECKPOINT_INDEX.txt
+
+# Whole-slide archives are too large for git (typical NDPI 200–500 MB).
+# One extracted punch lives in data/sample/.
+*.ndpi
+/data/*
+!/data/DATA_ON_REQUEST.txt
+!/data/sample/
+!/data/sample/**
+
+# Generated outputs
+predictions/
+logs/
+experiments/logs/
+experiments/model_eval/
+experiments/benchmark/
+experiments/task_difficulty/
+experiments/analysis/
+experiments/*.log
+experiments/EXPERIMENT_LOG_APPEND.tsv
+scripts/*.log
+texput.log
+
+# Manuscript and revision materials stay local
+manuscript/
+
+# Internal one-off analysis (not the public pipeline)
+scripts/analysis/
+src/fem_mushrooming/
+src/radial_mushrooming_analyzer.py
+compare_masks.py
+
+# LaTeX leftovers if any stray outside manuscript/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.out

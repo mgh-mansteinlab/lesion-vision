@@ -1,0 +1,34 @@
+Lesion Vision — checkpoint directory index
+==========================================
+
+Mapped from the model-evaluation session that ranked every best_model.pth
+on a 5-slide ground-truth set (mean Dice). Timestamped training folders
+were renamed to the ablation / hyperparameter preset that produced them.
+
+Sweep (configs/experiments/*.yaml, Mar 30 – Apr 1 2026)
+-------------------------------------------------------
+Old directory                      New directory                 Notes
+model_20260401_072423              single_scale_448              Eval winner (mean Dice 0.972)
+model_20260401_163141              single_scale_768
+model_20260331_044411              baseline_multi_scale          448+768, all shifts, compound
+model_20260331_012138              baseline_deterministic
+model_20260330_135135              backbone_convnext_small
+model_20260330_164258              backbone_efficientnet_b0
+model_20260330_185703              backbone_efficientnet_b3
+model_20260330_221626              backbone_resnet34
+model_20260331_080649              ce_no_class_weights
+model_20260331_112750              loss_ce_only
+model_20260331_144933              loss_focal                    Lowest train val_loss; not best Dice
+model_20260331_181344              no_activation_checkpointing
+model_20260331_205346              no_augment
+model_20260401_001658              no_weighted_sampling
+model_20260401_034022              scheduler_plateau
+model_20260401_070304              shift_no_shift                Fewer tiles/epoch; not comparable
+model_20260401_071217              shift_ovlp_20                 Fewer tiles/epoch; not comparable
+
+Pre-sweep / backup (named from stored hyperparameters)
+------------------------------------------------------
+Old directory                      New directory                 Hyperparams (from config.json)
+model_20260306_105529              presweep_convnext_base_multiscale   ConvNeXt-Base, 448+768, 100 ep, resume
+model_20260305_135350              presweep_convnext_base_100ep        ConvNeXt-Base, 100 ep, compound
+bkp_model_20250501_134500          presweep_efficientnet_b3            EfficientNet-B3, 30 ep, no augment

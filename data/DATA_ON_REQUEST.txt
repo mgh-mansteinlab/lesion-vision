@@ -1,0 +1,7 @@
+Image data (whole-slide NDPI/TIFF and training tiles) is available on request from the corresponding author, subject to institutional approvals.
+
+This repository includes one extracted punch for testing:
+
+  data/sample/CCA-1_punch.tif
+
+Place a received tiled training corpus under this directory (see README for `tile_*/` and `mask_*/` layout).

@@ -1,0 +1,10 @@
+Model checkpoints are available on request.
+
+Contact the corresponding author (see CITATION.cff / README).
+Place received weights at:
+
+  models/<experiment_name>/best_model.pth
+
+The manuscript model is ConvNeXt-Base UNet trained jointly on 448 and 768 px tiles.
+If `models/single_scale_448/best_model.pth` is present, the predictor uses it by default.
+See CHECKPOINT_INDEX.txt for sweep directory names.

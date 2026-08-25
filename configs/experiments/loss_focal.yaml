@@ -1,0 +1,22 @@
+# Ablation: focal loss instead of compound CE+Dice.
+name: loss_focal
+description: Focal loss only (see train.py loss_type focal).
+train:
+  backbone: tu-convnext_base
+  img_size: 512
+  tile_size: [448, 768]
+  shift_type: all
+  loss_type: focal
+  scheduler_type: cosine
+  warmup_epochs: 2
+  epochs: 10
+  batch_size: 16
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0001
+  patience: 10
+  augment: true
+  weighted_sampling: true
+  sampling_alpha: 0.85
+  activation_checkpointing: true
+  seed: 42
+  val_split: 0.2
