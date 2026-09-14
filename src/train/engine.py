@@ -1,5 +1,6 @@
 """Epoch train / validate loop mixed into LesionSegmentationModel."""
 
+import os
 import time
 
 import numpy as np
@@ -119,11 +120,25 @@ class TrainEngine:
                         'val_loss': f"{loss.item():.4f}",
                         'val_acc': f"{batch_correct / batch_total:.4f}"
                     })
-        
+
         avg_loss = total_loss / batch_count
         accuracy = correct / total_pixels if total_pixels else 0.0
+
+        # Allreduce val metrics across ranks so that EVERY rank computes the
+        # same val_loss. Without this, each rank early-stops on its own shard's
+        # loss, the ranks desynchronize on the next epoch's DDP collectives,
+        # and the NCCL watchdog kills the run (SIGABRT after 10-min timeout).
+        if distributed:
+            import torch.distributed as dist
+            t = torch.tensor([total_loss, batch_count, correct, total_pixels],
+                             dtype=torch.float64, device=self.device)
+            dist.all_reduce(t, op=dist.ReduceOp.SUM)
+            total_loss, batch_count, correct, total_pixels = t.tolist()
+            avg_loss = total_loss / batch_count if batch_count else 0.0
+            accuracy = correct / total_pixels if total_pixels else 0.0
+
         return {'loss': avg_loss, 'accuracy': accuracy}
-    
+
     def train(
         self,
         train_dataloader,
@@ -169,12 +184,25 @@ class TrainEngine:
         best_model_state = None
         epochs_no_improve = 0
         early_stop = False
-        
+
+        # Resume support: continue from the checkpoint's epoch and best val
+        # loss so early stopping and the LR schedule continue correctly.
+        start_epoch = 0
+        resume_state = getattr(self, '_resume_epoch', None)
+        if resume_state is not None:
+            start_epoch = int(resume_state) + 1
+            if getattr(self, '_resume_val_loss', None) is not None:
+                best_val_loss = float(self._resume_val_loss)
+            if rank == 0:
+                print(f"Resuming from epoch {start_epoch} "
+                      f"(best val loss {best_val_loss if best_val_loss != float('inf') else 'n/a'})")
+
         # Create progress bar for epochs on rank 0
         if rank == 0:
-            epoch_pbar = tqdm(range(epochs), desc="Epoch Progress", position=0)
+            epoch_pbar = tqdm(range(start_epoch, epochs), desc="Epoch Progress",
+                              initial=start_epoch, total=epochs, position=0)
         else:
-            epoch_pbar = range(epochs)
+            epoch_pbar = range(start_epoch, epochs)
         
         for epoch in epoch_pbar:
             epoch_start_time = time.time()

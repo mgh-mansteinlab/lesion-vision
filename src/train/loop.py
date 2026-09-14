@@ -38,6 +38,10 @@ def create_data_loaders(args, rank=0, world_size=1):
         val_split=args.val_split,
         random_state=args.seed,
         disk_tile_sizes=tile_sizes,
+        split_level=getattr(args, 'split_level', 'tile'),
+        holdout_groups=getattr(args, 'holdout_groups', None),
+        exclude_groups=getattr(args, 'exclude_groups', None),
+        train_slides=getattr(args, 'train_slides', None),
     )
 
     if rank == 0:

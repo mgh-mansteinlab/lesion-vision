@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import os
+import re
 import glob
 import numpy as np
 import cv2
@@ -174,20 +175,20 @@ class TiledLesionDataset(Dataset):
         
         # Compute weights for all samples
         weights = np.ones(len(self))
-        
+
         # We'll analyze a subset of samples to determine their weights
         num_to_process = min(len(self), 1000)
         indices = np.random.choice(len(self), num_to_process, replace=False)
-        
+
         print(f"Computing sample weights for {num_to_process} samples...")
-        
+
         for i, idx in enumerate(indices):
             if i % 100 == 0:
                 print(f"Processing sample {i}/{num_to_process}...")
-                
+
             _, mask = self[idx]
             mask_np = mask.numpy()
-            
+
             # Determine which classes are present in this sample
             sample_weight = 1.0
             for c in range(self.n_classes):
@@ -195,8 +196,18 @@ class TiledLesionDataset(Dataset):
                     # Increase weight based on rare classes (ablation and coagulation)
                     if c >= 2:  # Classes 2 (coagulation) and 3 (ablation) are rare
                         sample_weight *= (1.0 + alpha * class_weights[c])
-            
+
             weights[idx] = sample_weight
+
+        # Samples NOT analyzed keep weight 1.0; scale up the analyzed rare-
+        # class samples so the expected number of rare-class draws per epoch
+        # matches an all-samples weighting. This approximates full-dataset
+        # weighting at 1/1000 the IO cost.
+        analyzed_rare = (weights[indices] > 1.0).sum()
+        if analyzed_rare > 0 and num_to_process < len(self):
+            scale = len(self) / num_to_process
+            weights[indices] = np.where(weights[indices] > 1.0,
+                                       weights[indices] * scale, 1.0)
             
         # Normalize weights
         weights = weights / weights.sum() * len(weights)
@@ -307,6 +318,42 @@ class TiledLesionDataset(Dataset):
         return img_tensor, mask_tensor
 
 
+def slide_id_from_tile_path(path):
+    """Recover the whole-slide identifier from a tile path.
+
+    Tiles are named '<slide>_<row>_<col>.tif' by src.data.tiling, so the
+    slide id is the stem with the trailing '_<row>_<col>' removed. Falls
+    back to the full stem when the suffix pattern is absent.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    parts = stem.rsplit('_', 2)
+    if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+        return parts[0]
+    return stem
+
+
+def punch_id_from_tile_path(path):
+    """Recover the punch identifier from a tile path.
+
+    Slide names are '<punch>_<slide_number>' (e.g. 'PVcont16_02' is slide 2
+    of punch 'PVcont16'), so the punch id is the slide id with a trailing
+    '_<digits>' slide number removed. Falls back to the slide id when the
+    suffix pattern is absent. Grouping by punch keeps all whole-slide
+    images of one punch in the same subset; the punch is the analysis unit
+    and the closest available proxy for the donor.
+
+    Override: the annotated laser-only punch of this tissue bank is one
+    punch whose 32 serial sections are mounted as the WSIs PVcont1_01
+    .. PVcont18_03 (folder report: 'PVcont — laser-only serials of one
+    punch'). All PVcont* slides therefore map to the single punch 'PVcont'.
+    """
+    slide_id = slide_id_from_tile_path(path)
+    if slide_id.startswith('PVcont'):
+        return 'PVcont'
+    m = re.match(r'^(.*)_\d+$', slide_id)
+    return m.group(1) if m else slide_id
+
+
 def get_train_val_dataset(
     data_dir,
     img_size=(512, 512),
@@ -316,6 +363,10 @@ def get_train_val_dataset(
     random_state=42,
     disk_tile_size=None,
     disk_tile_sizes=None,
+    split_level='tile',
+    holdout_groups=None,
+    exclude_groups=None,
+    train_slides=None,
 ):
     """
     Split the dataset into training and validation sets.
@@ -329,6 +380,24 @@ def get_train_val_dataset(
         random_state: Seed for reproducible splits.
         disk_tile_size: Single tile size on disk (legacy).
         disk_tile_sizes: List of tile sizes (e.g. [448, 768]). Takes precedence.
+        split_level: 'tile' (legacy, splits on tile paths; can leak slides
+            between subsets), 'slide' (whole-slide-disjoint: all tiles of a
+            given slide, at every tile size and shift, go to the same subset),
+            or 'punch' (punch-disjoint: all slides of a given punch stay in
+            the same subset; the punch is the analysis unit and the closest
+            available proxy for the donor).
+        holdout_groups: Optional list of group ids (punch or slide ids,
+            depending on split_level) forced into the validation subset
+            regardless of the random draw, e.g. ['PVcont'] to guarantee the
+            annotated punch is never in the training pool.
+        exclude_groups: Optional list of group ids removed from the dataset
+            entirely (neither train nor val), e.g. ['RH'] to drop an H&E
+            slide's punch that is out of scope for the NBTC framework.
+        train_slides: Optional list of slide ids forced into the TRAINING
+            subset regardless of the split, e.g. ['PVcont9_01', 'PVcont9_02']
+            to teach the model deep-layer coagulation-only morphology from
+            specific serials while the rest of that punch stays held out.
+            The forced slides are also removed from validation.
 
     Returns:
         (train_dataset, val_dataset)
@@ -355,12 +424,82 @@ def get_train_val_dataset(
             f"Run src.data.tiling to generate tiles."
         )
 
-    train_imgs, val_imgs, train_masks, val_masks = train_test_split(
-        full_dataset.image_paths,
-        full_dataset.mask_paths,
-        test_size=val_split,
-        random_state=random_state,
-    )
+    # Drop excluded groups (e.g. an H&E slide's punch) from both subsets.
+    if exclude_groups:
+        excl = set(exclude_groups)
+        keep = [i for i, p in enumerate(full_dataset.image_paths)
+                if slide_id_from_tile_path(p) not in excl
+                and punch_id_from_tile_path(p) not in excl]
+        dropped = len(full_dataset.image_paths) - len(keep)
+        if dropped:
+            full_dataset.image_paths = [full_dataset.image_paths[i] for i in keep]
+            full_dataset.mask_paths = [full_dataset.mask_paths[i] for i in keep]
+            if len(full_dataset.image_paths) == 0:
+                raise ValueError("exclude_groups removed every sample from the dataset")
+            print(f"Excluded {dropped} tiles from groups {sorted(excl)} "
+                  f"(neither train nor val).")
+
+    if split_level in ('slide', 'punch'):
+        # Group-disjoint split: no slide ('slide') or punch ('punch')
+        # contributes tiles to both subsets. All tile sizes and shift
+        # grids of a group stay together. Grouping by punch additionally
+        # keeps all whole-slide images of one punch in the same subset.
+        if split_level == 'slide':
+            group_ids = [slide_id_from_tile_path(p) for p in full_dataset.image_paths]
+            group_name = 'slides'
+        else:
+            group_ids = [punch_id_from_tile_path(p) for p in full_dataset.image_paths]
+            group_name = 'punches'
+        unique_groups = sorted(set(group_ids))
+        val_groups = set(
+            train_test_split(
+                unique_groups,
+                test_size=val_split,
+                random_state=random_state,
+            )[1]
+        )
+        if holdout_groups:
+            forced = set(holdout_groups)
+            unknown = forced - set(unique_groups)
+            if unknown:
+                raise ValueError(
+                    f"holdout_groups not found in the dataset: {sorted(unknown)}. "
+                    f"Available groups: {unique_groups}"
+                )
+            val_groups |= forced
+        train_imgs, train_masks, val_imgs, val_masks = [], [], [], []
+        forced_train_slides = set(train_slides or [])
+        n_forced = 0
+        for img, msk, gid, sid in zip(full_dataset.image_paths,
+                                       full_dataset.mask_paths, group_ids,
+                                       [slide_id_from_tile_path(p)
+                                        for p in full_dataset.image_paths]):
+            if sid in forced_train_slides:
+                train_imgs.append(img)
+                train_masks.append(msk)
+                n_forced += 1
+            elif gid in val_groups:
+                val_imgs.append(img)
+                val_masks.append(msk)
+            else:
+                train_imgs.append(img)
+                train_masks.append(msk)
+        if n_forced:
+            print(f"Forced {n_forced} tiles from slides {sorted(forced_train_slides)} "
+                  f"into the training subset (removed from validation).")
+        if not train_imgs or not val_imgs:
+            raise ValueError(
+                f"{split_level}-disjoint split produced an empty subset "
+                f"(train {group_name} {len(unique_groups) - len(val_groups)}, "
+                f"val {group_name} {len(val_groups)}). Check the data directory."
+            )
+    else:
+        train_imgs, val_imgs, train_masks, val_masks = train_test_split(
+            full_dataset.image_paths,
+            full_dataset.mask_paths,
+            test_size=val_split,
+            random_state=random_state,
+        )
 
     train_dataset = TiledLesionDataset(**ds_kwargs, augment=augment, is_train=True)
     train_dataset.image_paths = train_imgs

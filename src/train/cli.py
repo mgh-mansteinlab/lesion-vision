@@ -42,6 +42,25 @@ def parse_args():
                         help='Apply data augmentation')
     parser.add_argument('--val_split', type=float, default=0.2,
                         help='Validation split ratio')
+    parser.add_argument('--split_level', type=str, default='tile',
+                        choices=['tile', 'slide', 'punch'],
+                        help="Split unit: 'tile' (legacy; can leak slides between subsets), "
+                             "'slide' (whole-slide-disjoint split; all tiles of a slide "
+                             "stay in the same subset), or 'punch' (punch-disjoint; all "
+                             "slides of a punch stay in the same subset; the punch is the "
+                             "analysis unit and the closest proxy for the donor)")
+    parser.add_argument('--holdout_groups', type=str, nargs='*', default=None,
+                        help="Group ids (punch or slide ids, per --split_level) forced into "
+                             "the validation subset, e.g. --holdout_groups PVcont to keep "
+                             "the annotated punch out of the training pool")
+    parser.add_argument('--exclude_groups', type=str, nargs='*', default=None,
+                        help="Group ids removed from the dataset entirely (neither train "
+                             "nor val), e.g. --exclude_groups RH to drop an out-of-scope "
+                             "H&E slide's punch")
+    parser.add_argument('--train_slides', type=str, nargs='*', default=None,
+                        help="Slide ids forced into the training subset (and removed from "
+                             "validation), e.g. --train_slides PVcont9_01 PVcont9_02 to "
+                             "teach deep-layer morphology from specific serials")
     parser.add_argument('--patience', type=int, default=15,
                         help='Early stopping patience')
     parser.add_argument('--log_interval', type=int, default=10,

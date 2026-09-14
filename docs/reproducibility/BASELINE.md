@@ -10,7 +10,8 @@ Default training configuration matching the manuscript methods.
 | 448 + 768 tiles, resized to 512 | `scripts/train.py --tile_size 448 768 --img_size 512` |
 | Five overlap grids | `shift_type=all` (no_shift + ovlp_20/40/60/80) |
 | Compound CE+Dice and class weights | `--loss_type compound`; `configs/class_weights.json` |
-| Tile-level 80/20 split, seed 42 | `src/data/dataset.py` (not slide-disjoint) |
+| Tile-level 80/20 split, seed 42 | `src/data/dataset.py` (legacy; not slide-disjoint) |
+| Punch-disjoint split | `--split_level punch` (`src/data/dataset.py`); preset `configs/experiments/baseline_multi_scale_slide_split.yaml`. `--split_level slide` is also available for WSI-disjoint splitting. |
 | Topology post-process | `src/infer/postprocess.py` (on by default) |
 | Per-lesion morphometry | `src/analytics/lesions.py` |
 | NDPI extraction | `src/infer/ndpi.py` (default OpenSlide level 2) |

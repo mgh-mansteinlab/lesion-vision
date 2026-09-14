@@ -194,7 +194,22 @@ class LesionSegmentationModel(TrainEngine):
                 for k, v in state_dict.items()
             }
         self.model.load_state_dict(state_dict)
-        
+
+        # Restore optimizer / scheduler / early-stopping state so that
+        # --resume continues training rather than restarting the schedule.
+        if 'optimizer_state_dict' in checkpoint:
+            try:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except Exception as e:
+                print(f"Warning: could not restore optimizer state: {e}")
+        if 'scheduler_state_dict' in checkpoint and self.scheduler is not None:
+            try:
+                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            except Exception as e:
+                print(f"Warning: could not restore scheduler state: {e}")
+        self._resume_epoch = checkpoint.get('epoch', None)
+        self._resume_val_loss = checkpoint.get('val_loss', None)
+
         if device is not None:
             self.model = self.model.to(device)
         
@@ -235,10 +250,12 @@ class LesionSegmentationModel(TrainEngine):
         
         # Wrap model with DDP if not already wrapped
         if not isinstance(self.model, DDP):
+            # static_graph=True detects unused parameters automatically;
+            # passing find_unused_parameters=True alongside it is redundant
+            # (PyTorch warns) and slows the first iteration.
             print(f"Rank {rank}: Setting up DDP with static_graph=True")
             self.model = DDP(
                 self.model,
                 device_ids=[rank],
-                find_unused_parameters=True,
                 static_graph=True,
             )
