@@ -8,7 +8,8 @@ YAML files under `configs/experiments/` describe training presets. The launcher 
 
 | File | Purpose |
 |------|---------|
-| `baseline_multi_scale.yaml` | 448+768 tiles, all shifts, compound loss (paper-aligned stack). |
+| `baseline_multi_scale.yaml` | 448+768 tiles, all shifts, compound loss (tile-path split). |
+| `baseline_multi_scale_slide_split.yaml` | Same stack with a punch-disjoint train/val split (paper-aligned). |
 | `baseline_deterministic.yaml` | Same + `--deterministic` for reproducibility. |
 | `single_scale_768.yaml` | 768-only tiles. |
 | `single_scale_448.yaml` | 448-only tiles. |

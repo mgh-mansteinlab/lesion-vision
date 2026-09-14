@@ -19,6 +19,7 @@ Human tissue in the associated study was discarded abdominoplasty skin collected
 - **Four-class segmentation** of AFL histology (background / tissue / coagulation / ablation)
 - **NDPI and TIFF** whole-slide input, including multi-punch NDPI files split into per-sample TIFFs
 - **Joint multi-scale training**: 448×448 and 768×768 tiles, both rescaled to 512×512, with five overlap grids
+- **Punch-disjoint train/val split** so all whole-slide images of a punch stay in one subset (`--split_level punch`; `--split_level slide` for WSI-disjoint)
 - **Complete-field morphometry** on every detection that passes the area filter (not a 10-lesion subsample)
 - **Topology post-processing** to enforce ablation-inside-coagulation
 - **Object-level evaluation**: detection recall/precision and paired Bland–Altman versus expert outlines
@@ -102,7 +103,7 @@ DATA_DIR/
 
 Tile filenames must match the corresponding masks. Generate tiles with `python utils/TileGen.py` (implementation: `src/data/tiling.py`).
 
-Paper-aligned training (tile-path 80/20 split, seed 42; **not** slide-disjoint):
+Paper-aligned training (punch-disjoint split, seed 42):
 
 ```bash
 export DATA_DIR=/path/to/tiles
@@ -124,8 +125,12 @@ python scripts/train.py \
   --weighted_sampling \
   --sampling_alpha 0.85 \
   --activation_checkpointing \
+  --split_level punch \
+  --holdout_groups PVcont \
   --seed 42
 ```
+
+`--split_level punch` keeps every WSI of a punch in the same subset. `--holdout_groups` forces named punches into validation. `--split_level slide` is WSI-disjoint; omit `--split_level` for the legacy tile-path 80/20 split. YAML preset: `configs/experiments/baseline_multi_scale_slide_split.yaml`.
 
 Or: `export DATA_DIR=/path/to/tiles && bash scripts/train.sh`
 
