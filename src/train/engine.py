@@ -197,6 +197,24 @@ class TrainEngine:
                 print(f"Resuming from epoch {start_epoch} "
                       f"(best val loss {best_val_loss if best_val_loss != float('inf') else 'n/a'})")
 
+        # train_history.json of the resumed run overrides the checkpoint's
+        # val_loss (that is the checkpoint epoch's loss, not the best one) and
+        # restores the early-stopping counter. Every rank loads it, so the
+        # stopping decision stays identical across ranks.
+        resume_history = getattr(self, '_resume_history', None)
+        epoch_log = []
+        best_epoch = None
+        if resume_history:
+            best_val_loss = float(resume_history['best_val_loss'])
+            epochs_no_improve = int(resume_history['epochs_no_improve'])
+            best_epoch = int(resume_history['best_epoch'])
+            epoch_log = list(resume_history.get('epochs', []))
+        history_path = (os.path.join(os.path.dirname(model_save_path), 'train_history.json')
+                        if model_save_path else None)
+        best_model_ref = (resume_history or {}).get('best_model_path')
+        if resume_history and model_save_path and os.path.exists(model_save_path):
+            best_model_ref = model_save_path  # previous best, copied into this run dir
+
         # Create progress bar for epochs on rank 0
         if rank == 0:
             epoch_pbar = tqdm(range(start_epoch, epochs), desc="Epoch Progress",
@@ -254,11 +272,17 @@ class TrainEngine:
                     print(f"Val Loss: {val_metrics['loss']:.4f}, Val Acc: {val_metrics['accuracy']:.4f}")
                     print(f"Learning Rate: {curr_lr:.6f}")
             
-            # Save best model on main process only
-            if rank == 0 and val_metrics['loss'] < best_val_loss:
+            # Decide improvement on EVERY rank (val loss is all-reduced, so all
+            # ranks agree) and save on rank 0 only. Gating the decision on
+            # rank 0 made ranks 1..N-1 count every epoch as "no improvement",
+            # so they early-stopped at epoch == patience while rank 0 kept
+            # training, and the NCCL watchdog killed the run.
+            if val_metrics['loss'] < best_val_loss:
                 best_val_loss = val_metrics['loss']
-                
-                if model_save_path:
+                best_epoch = epoch + 1
+                best_model_ref = model_save_path
+
+                if rank == 0 and model_save_path:
                     if distributed:
                         best_model_state = self.model.module.state_dict().copy()
                     else:
@@ -271,6 +295,7 @@ class TrainEngine:
                         'epoch': epoch,
                         'n_classes': self.n_classes,
                         'backbone': self.backbone,
+                        'arch': getattr(self, 'arch', 'auto'),
                         'input_shape': self.input_shape,
                         'learning_rate': self.learning_rate,
                         'loss_type': self.loss_type,
@@ -304,6 +329,7 @@ class TrainEngine:
                     'epoch': epoch,
                     'n_classes': self.n_classes,
                     'backbone': self.backbone,
+                        'arch': getattr(self, 'arch', 'auto'),
                     'input_shape': self.input_shape,
                     'learning_rate': self.learning_rate,
                     'loss_type': self.loss_type,
@@ -317,7 +343,23 @@ class TrainEngine:
                 
                 if epoch % log_interval == 0:
                     print(f"Saved checkpoint for epoch {epoch+1}")
-                
+
+            # Per-epoch history, usable as --resume_history for a later resume.
+            if rank == 0 and history_path:
+                import json
+                epoch_log.append({'epoch': epoch + 1,
+                                  'train_loss': float(train_metrics['loss']),
+                                  'val_loss': float(val_metrics['loss']),
+                                  'val_accuracy': float(val_metrics['accuracy']),
+                                  'checkpoint': os.path.abspath(checkpoint_path)})
+                with open(history_path, 'w') as f:
+                    json.dump({'patience': patience, 'epochs': epoch_log,
+                               'best_epoch': best_epoch, 'best_val_loss': float(best_val_loss),
+                               'epochs_no_improve': epochs_no_improve,
+                               'best_model_path': os.path.abspath(best_model_ref) if best_model_ref else None,
+                               'last_checkpoint': os.path.abspath(checkpoint_path),
+                               'resumed_from': (resume_history or {}).get('source_run')}, f, indent=1)
+
             # Call the callback function with metrics if provided
             if callback is not None:
                 # Prepare metrics dictionary for logging

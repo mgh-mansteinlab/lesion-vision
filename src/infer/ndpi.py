@@ -18,6 +18,31 @@ except ImportError:
     OPENSLIDE_AVAILABLE = False
     print("Warning: openslide-python not available. NDPI support will be limited.")
 
+# Analysis scale the model is trained at: 40x scan (0.2208 um/px) at pyramid
+# level 2. A 20x scan reaches the same scale at level 1.
+TARGET_UM_PER_PX = 0.8832
+
+
+def choose_level(slide, target_um_per_px: float = TARGET_UM_PER_PX, tol: float = 0.05):
+    """Pick the pyramid level for the analysis scale from the slide's own metadata.
+
+    Returns (level, resize_factor, level_um_per_px). resize_factor is 1.0 when
+    a level is within ``tol`` of the target; otherwise the next finer level is
+    read and should be resized by resize_factor (< 1) to reach the target.
+    Raises if the slide carries no pixel size, because guessing a level is
+    what produced half-scale measurements on 20x scans.
+    """
+    mpp0 = float(slide.properties.get("openslide.mpp-x", "nan"))
+    if not np.isfinite(mpp0) or mpp0 <= 0:
+        raise ValueError("Slide has no pixel size (openslide.mpp-x); pass an explicit level")
+    mpps = [mpp0 * d for d in slide.level_downsamples]
+    best = min(range(len(mpps)), key=lambda i: abs(mpps[i] - target_um_per_px))
+    if abs(mpps[best] - target_um_per_px) / target_um_per_px <= tol:
+        return best, 1.0, mpps[best]
+    finer = [i for i in range(len(mpps)) if mpps[i] < target_um_per_px]
+    level = max(finer, key=lambda i: mpps[i]) if finer else 0
+    return level, mpps[level] / target_um_per_px, mpps[level]
+
 
 class NDPIExtractor:
     """Extract and convert NDPI files to TIF format, splitting into individual samples using OpenSlide."""
@@ -216,32 +241,48 @@ class NDPIExtractor:
             # Fallback to whole image if detection fails
             return [(0, 0, image_array.shape[1], image_array.shape[0])]
     
-    def extract_to_tif(self, compression: str = "lzw", level: int = 2, debug: bool = False) -> List[str]:
+    def extract_to_tif(self, compression: str = "lzw", level: Optional[int] = None, debug: bool = False) -> List[str]:
         """
         Extract NDPI file to multiple TIF files, one per sample.
         
         Args:
             compression: Compression method for TIF output (default: "lzw")
-            level: Pyramid level to extract (default: 2, same as training)
+            level: Pyramid level to extract. None (default) picks the level
+                that gives the analysis scale (TARGET_UM_PER_PX) from the
+                slide's pixel size: level 2 for 40x scans, level 1 for 20x.
             debug: If True, print debug information
             
         Returns:
-            List of paths to the extracted TIF files
+            List of paths to the extracted TIF files (each carries its true
+            pixel size in the TIFF resolution tags; also in self.um_per_px)
         """
         try:
             # Open NDPI file with OpenSlide
             slide = openslide.OpenSlide(self.input_file)
-            
-            # Get the dimensions at the specified level
-            if level >= len(slide.level_dimensions):
-                print(f"Warning: Level {level} not available, using level 0")
-                level = 0
+
+            resize = 1.0
+            if level is None:
+                level, resize, level_um = choose_level(slide)
+            else:
+                if level >= len(slide.level_dimensions):
+                    print(f"Warning: Level {level} not available, using level 0")
+                    level = 0
+                mpp0 = float(slide.properties.get("openslide.mpp-x", "nan"))
+                level_um = mpp0 * slide.level_downsamples[level]
+                if np.isfinite(level_um) and abs(level_um - TARGET_UM_PER_PX) / TARGET_UM_PER_PX > 0.05:
+                    print(f"WARNING: level {level} is {level_um:.4f} um/px, not the analysis scale "
+                          f"{TARGET_UM_PER_PX} um/px; predictions and um measurements will be off-scale")
             
             width, height = slide.level_dimensions[level]
-            print(f"Extracting NDPI at level {level}: {width}x{height}")
+            print(f"Extracting NDPI at level {level}: {width}x{height} ({level_um:.4f} um/px)")
             
             # Read the region at the specified level
             image = slide.read_region((0, 0), level, (width, height))
+            if resize != 1.0:
+                new_size = (int(round(width * resize)), int(round(height * resize)))
+                image = image.convert('RGB').resize(new_size, Image.Resampling.LANCZOS)
+                print(f"Resized to {new_size[0]}x{new_size[1]} for {TARGET_UM_PER_PX} um/px")
+            self.um_per_px = level_um / resize
             
             # Convert RGBA to RGB and to numpy array
             image_array = np.array(image.convert('RGB'))
@@ -281,8 +322,11 @@ class NDPIExtractor:
                     output_name = f"{base_name}_sample_{i:02d}.tif"
                     output_path = os.path.join(self.output_dir, output_name)
                     
-                    # Save as TIF using PIL with LZW compression
-                    Image.fromarray(sample_array).save(output_path, compression='tiff_lzw')
+                    # Save as TIF using PIL with LZW compression; record the true
+                    # pixel size (dpi = pixels per inch) so the scale travels with the file
+                    dpi = 25400.0 / self.um_per_px if np.isfinite(self.um_per_px) else None
+                    Image.fromarray(sample_array).save(output_path, compression='tiff_lzw',
+                                                       **({'dpi': (dpi, dpi)} if dpi else {}))
                     print(f"Saved sample {i} to: {output_path}")
                     output_paths.append(output_path)
                     
@@ -312,7 +356,8 @@ def main():
     parser = argparse.ArgumentParser(description='Extract samples from NDPI files')
     parser.add_argument('input_file', help='Path to input NDPI file')
     parser.add_argument('--output-dir', '-o', help='Output directory (default: same as input)', default=None)
-    parser.add_argument('--level', '-l', type=int, default=2, help='Pyramid level to extract (default: 2)')
+    parser.add_argument('--level', '-l', type=int, default=None,
+                        help='Pyramid level to extract (default: auto, the level giving %.4f um/px)' % TARGET_UM_PER_PX)
     parser.add_argument('--debug', '-d', action='store_true', help='Enable debug output')
     parser.add_argument('--visualize', '-v', action='store_true', help='Save visualization of detected regions')
     
@@ -337,7 +382,7 @@ def main():
             slide = openslide.OpenSlide(args.input_file)
             
             # Get the dimensions at the specified level
-            level = args.level
+            level = args.level if args.level is not None else choose_level(slide)[0]
             if level >= len(slide.level_dimensions):
                 print(f"Warning: Level {level} not available, using level 0")
                 level = 0

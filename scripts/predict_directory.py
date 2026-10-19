@@ -119,7 +119,8 @@ def main():
     ap.add_argument('--model', default=DEFAULT_MODEL)
     ap.add_argument('--tile-size', type=int, default=512)
     ap.add_argument('--overlap', type=int, default=128)
-    ap.add_argument('--ndpi-level', type=int, default=2)
+    ap.add_argument('--ndpi-level', type=int, default=None,
+                    help='NDPI pyramid level (default: auto, the level giving 0.8832 um/px)')
     ap.add_argument('--gpus', type=int, default=None)
     ap.add_argument('--no-post-process', action='store_true')
     ap.add_argument('--collect-dir', default=None,

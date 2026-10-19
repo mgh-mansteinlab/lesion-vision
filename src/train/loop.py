@@ -52,6 +52,11 @@ def create_data_loaders(args, rank=0, world_size=1):
     train_sampler = None
     
     if args.distributed:
+        # Weighted sampling is not implemented for DDP: the DistributedSampler
+        # below shuffles uniformly. Say so instead of ignoring the flag.
+        if args.weighted_sampling and rank == 0:
+            print("WARNING: --weighted_sampling is not supported with --distributed; "
+                  "training uses uniform DistributedSampler shuffling.")
         # Create distributed samplers
         train_sampler = DistributedSampler(
             train_dataset, 
@@ -117,11 +122,20 @@ def train_model(model, train_loader, val_loader, train_sampler, args, rank=0):
         os.makedirs(model_dir, exist_ok=True)
     
     best_model_path = os.path.join(model_dir, 'best_model.pth')
-    
+
+    # Carry the resumed run's best model into this run directory, so it stays
+    # the best model unless this session improves on it.
+    prev_best = (getattr(model, '_resume_history', None) or {}).get('best_model_path')
+    if rank == 0 and prev_best and os.path.exists(prev_best):
+        import shutil
+        shutil.copyfile(prev_best, best_model_path)
+        print(f"Copied previous best model {prev_best} -> {best_model_path}")
+
     # Save training configuration
     if rank == 0:
         config = {
             'backbone': args.backbone,
+            'arch': getattr(args, 'arch', 'auto'),
             'img_size': args.img_size,
             'tile_sizes': args.tile_size or [args.img_size],
             'batch_size': args.batch_size,
@@ -208,8 +222,12 @@ def train_model(model, train_loader, val_loader, train_sampler, args, rank=0):
     
     # Save the trained model
     if rank == 0:
-        model.save(best_model_path)
-        print(f"Model saved to {best_model_path}")
+        # The engine writes best_model.pth whenever val loss improves; only
+        # fall back to saving the in-memory weights if it never did, so the
+        # best model is never overwritten with last-epoch weights.
+        if not os.path.exists(best_model_path):
+            model.save(best_model_path)
+        print(f"Best model: {best_model_path}")
         
         # Plot training history
         plot_training_metrics(history, save_path=os.path.join(model_dir, 'training_metrics.png'))
@@ -243,11 +261,12 @@ def validate_model(model, val_loader, args, rank=0):
     # Set device
     device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
     
-    # Evaluate on some validation samples
-    if args.distributed:
-        model.module.eval()
-    else:
-        model.model.eval()
+    # Evaluate on some validation samples. model is the LesionSegmentationModel
+    # wrapper; under DDP its network is model.model.module. Use the unwrapped
+    # network: only rank 0 runs this, so a DDP forward could wait on ranks
+    # that have already left.
+    net = model.model.module if args.distributed else model.model
+    net.eval()
     
     with torch.no_grad():
         for i, (images, masks) in enumerate(val_loader):
@@ -259,10 +278,7 @@ def validate_model(model, val_loader, args, rank=0):
             masks = masks.to(device)
             
             # Make predictions
-            if args.distributed:
-                outputs = model(images)
-            else:
-                outputs = model.model(images)
+            outputs = net(images)
             
             # Convert to probabilities
             probabilities = torch.softmax(outputs, dim=1)
@@ -360,6 +376,7 @@ def train_process(rank, world_size, args):
         model = LesionSegmentationModel(
             n_classes=args.n_classes,
             backbone=args.backbone,
+            arch=getattr(args, 'arch', 'auto'),
             encoder_weights='imagenet',
             learning_rate=args.learning_rate,
             input_shape=(3, args.img_size, args.img_size),
@@ -380,6 +397,13 @@ def train_process(rank, world_size, args):
             model.load(args.resume, device=device)
             if rank == 0:
                 print("Checkpoint loaded — model weights, optimizer and scheduler restored")
+        if getattr(args, 'resume_history', None):
+            with open(args.resume_history) as f:
+                model._resume_history = json.load(f)
+            if rank == 0:
+                h = model._resume_history
+                print(f"Early-stopping state from {args.resume_history}: best epoch {h['best_epoch']} "
+                      f"(val loss {h['best_val_loss']:.5f}), {h['epochs_no_improve']} epoch(s) without improvement")
         
         # Set up distributed training
         if args.distributed:

@@ -1,4 +1,4 @@
-"""SMP segmentation network: Unet or Unet++ depending on encoder support."""
+"""SMP segmentation network (Unet by default; other SMP decoders selectable)."""
 
 import torch
 import torch.nn as nn
@@ -10,6 +10,27 @@ _UNETPP_INCOMPATIBLE_PREFIXES = ("tu-convnext", "tu-convnextv2", "mit_b")
 
 def uses_plain_unet(backbone: str) -> bool:
     return any(backbone.startswith(prefix) for prefix in _UNETPP_INCOMPATIBLE_PREFIXES)
+
+
+# arch name -> SMP class. 'auto' keeps the original rule (Unet for ConvNeXt /
+# MiT encoders, Unet++ otherwise), so checkpoints saved before the arch
+# option existed rebuild exactly as trained.
+ARCHS = {
+    'unet': smp.Unet,
+    'unetplusplus': smp.UnetPlusPlus,
+    'deeplabv3plus': smp.DeepLabV3Plus,
+    'upernet': smp.UPerNet,
+    'segformer': smp.Segformer,
+    'fpn': smp.FPN,
+}
+
+
+def resolve_arch(arch: str, backbone: str) -> str:
+    if arch in (None, '', 'auto'):
+        return 'unet' if uses_plain_unet(backbone) else 'unetplusplus'
+    if arch not in ARCHS:
+        raise ValueError(f"Unknown arch {arch!r}; choose from {sorted(ARCHS)} or 'auto'")
+    return arch
 
 
 class SMPSegmentationNet(nn.Module):
@@ -25,11 +46,13 @@ class SMPSegmentationNet(nn.Module):
         backbone="tu-convnext_base",
         encoder_weights="imagenet",
         activation_checkpointing=False,
+        arch='auto',
     ):
         super().__init__()
         self.backbone = backbone
+        self.arch = resolve_arch(arch, backbone)
         self._activation_checkpointing = activation_checkpointing
-        arch_cls = smp.Unet if uses_plain_unet(backbone) else smp.UnetPlusPlus
+        arch_cls = ARCHS[self.arch]
         self.model = arch_cls(
             encoder_name=backbone,
             encoder_weights=encoder_weights,

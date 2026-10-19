@@ -207,7 +207,7 @@ class MultiGPUBatchPredictor(BatchPlotsMixin):
                     ndpi_extractor = NDPIExtractor(input_file=ndpi_file, output_dir=temp_dir)
                     extracted_files = ndpi_extractor.extract_to_tif(
                         compression="lzw",
-                        level=2,  # Same as training
+                        level=None,  # auto: level giving the training scale (0.8832 um/px)
                         debug=True
                     )
                     

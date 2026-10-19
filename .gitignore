@@ -61,9 +61,30 @@ texput.log
 # Manuscript and revision materials stay local
 manuscript/
 
-# Internal one-off analysis (not the public pipeline)
-scripts/analysis/
+# Analysis scripts: only those behind the final pipeline and the paper's tables/figures are public
+scripts/analysis/*
+!scripts/analysis/r3_stats.py
+!scripts/analysis/component_filter.py
+!scripts/analysis/ensemble_probs.py
+!scripts/analysis/greedy_ensemble.py
+!scripts/analysis/r3_example_series.py
+!scripts/analysis/r3_make_tables.py
+!scripts/analysis/r3_make_figures.py
+!scripts/analysis/r3_compare_models.py
+!scripts/analysis/r3_cpu_report.py
+!scripts/analysis/manual_sampling_sim.py
+!scripts/analysis/r3_glahn_comparison.py
+!scripts/analysis/r3_export_source_data.py
+!scripts/analysis/score_preds.py
+!scripts/analysis/diff_maps.py
+!scripts/analysis/size_rule_postproc.py
+!scripts/analysis/compute_class_weights.py
 compare_masks.py
+
+# One-off run orchestration and dataset preparation (kept local)
+scripts/r3_*.sh
+scripts/normalize_source_scale.py
+scripts/make_tissue_only_gt.py
 
 # LaTeX leftovers if any stray outside manuscript/
 *.aux

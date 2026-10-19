@@ -22,6 +22,9 @@ def parse_args():
                         help='Directory to save model checkpoints and logs')
     parser.add_argument('--backbone', type=str, default='tu-convnext_base',
                         help='Encoder backbone (e.g. tu-convnext_base, tu-convnext_small, efficientnet-b3)')
+    parser.add_argument('--arch', type=str, default='auto',
+                        choices=['auto', 'unet', 'unetplusplus', 'deeplabv3plus', 'upernet', 'segformer', 'fpn'],
+                        help="Decoder architecture. 'auto' = Unet for ConvNeXt/MiT encoders, Unet++ otherwise")
     parser.add_argument('--img_size', type=int, default=512,
                         help='Image size for training (square)')
     parser.add_argument('--batch_size', type=int, default=2,
@@ -100,6 +103,9 @@ def parse_args():
                         help='Disk tile size(s) to load (e.g. 448 768). All are resized to --img_size for the model.')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to a checkpoint (.pth) to resume training from')
+    parser.add_argument('--resume_history', type=str, default=None,
+                        help='train_history.json of the run being resumed: restores the best val '
+                             'loss, the early-stopping counter and the previous best_model.pth')
     parser.add_argument('--use_tta', action='store_true',
                         help='Enable test-time augmentation during validation visualization')
     

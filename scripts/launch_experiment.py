@@ -43,6 +43,8 @@ def build_argv(yaml_path: Path, project_dir: Path) -> list[str]:
         output_dir,
         "--backbone",
         str(t.get("backbone", "tu-convnext_base")),
+        "--arch",
+        str(t.get("arch", "auto")),
         "--img_size",
         str(int(t.get("img_size", 512))),
         "--tile_size",

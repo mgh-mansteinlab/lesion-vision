@@ -37,6 +37,7 @@ class LesionSegmentationModel(TrainEngine):
         scheduler_type='cosine',
         warmup_epochs=5,
         total_epochs=100,
+        arch='auto',
     ):
         """
         Initialize the model.
@@ -60,6 +61,7 @@ class LesionSegmentationModel(TrainEngine):
         self.input_shape = input_shape
         self.n_classes = n_classes
         self.backbone = backbone
+        self.arch = arch
         self.encoder_weights = encoder_weights
         self.learning_rate = learning_rate
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -115,6 +117,7 @@ class LesionSegmentationModel(TrainEngine):
             backbone=self.backbone,
             encoder_weights=self.encoder_weights,
             activation_checkpointing=self.activation_checkpointing,
+            arch=getattr(self, 'arch', 'auto'),
         )
         return model
     
@@ -157,6 +160,7 @@ class LesionSegmentationModel(TrainEngine):
             'scheduler_state_dict': self.scheduler.state_dict(),
             'n_classes': self.n_classes,
                         'backbone': self.backbone,
+                        'arch': getattr(self, 'arch', 'auto'),
                         'encoder_weights': getattr(self, 'encoder_weights', 'imagenet'),
             'input_shape': self.input_shape,
             'learning_rate': self.learning_rate,
@@ -174,6 +178,7 @@ class LesionSegmentationModel(TrainEngine):
         
         self.n_classes = checkpoint.get('n_classes', self.n_classes)
         self.backbone = checkpoint.get('backbone', self.backbone)
+        self.arch = checkpoint.get('arch', getattr(self, 'arch', 'auto'))
         self.encoder_weights = checkpoint.get('encoder_weights', getattr(self, 'encoder_weights', 'imagenet'))
         self.input_shape = checkpoint.get('input_shape', self.input_shape)
         self.learning_rate = checkpoint.get('learning_rate', self.learning_rate)
@@ -254,6 +259,10 @@ class LesionSegmentationModel(TrainEngine):
             # passing find_unused_parameters=True alongside it is redundant
             # (PyTorch warns) and slows the first iteration.
             print(f"Rank {rank}: Setting up DDP with static_graph=True")
+            # DDP prints "Grad strides do not match bucket view strides" once per
+            # rank: ConvNeXt depthwise weights are [C, 1, 7, 7] and the stride
+            # of the size-1 dim is arbitrary. The layout is equivalent, so the
+            # warning is harmless (gradient_as_bucket_view does not silence it).
             self.model = DDP(
                 self.model,
                 device_ids=[rank],

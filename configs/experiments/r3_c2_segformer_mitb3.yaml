@@ -1,0 +1,41 @@
+# Round-3 model 2: model-1 recipe plus lesion-free (tissue-only) NBTC hard
+# negatives, trained from scratch. Same punch-disjoint design: the annotated
+# punch (PVcont) is excluded from training AND validation and plays no part in
+# early stopping or checkpoint selection.
+name: r3_c2_segformer_mitb3
+description: "Architecture comparison c2_segformer_mitb3: SegFormer transformer (MiT-B3 encoder). Data, split, class weights, schedule identical to model 2."
+train:
+  arch: segformer
+  backbone: mit_b3
+  img_size: 512
+  tile_size: [448, 768]
+  shift_type: all
+  loss_type: compound
+  scheduler_type: cosine
+  warmup_epochs: 5
+  epochs: 100
+  batch_size: 16
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0001
+  patience: 10
+  augment: true
+  weighted_sampling: false
+  sampling_alpha: 0.85
+  activation_checkpointing: true
+  seed: 42
+  val_split: 0.2
+  split_level: punch
+  exclude_groups: [PVcont]
+  class_weights: "1.7723,1.0,4.9554,8.4487"
+notes: |
+  Differences from model 1 (configs/experiments/baseline_multi_scale_slide_split.yaml):
+  - Training pool adds 14 tissue-only NBTC strips (NDX_*; GT = model tissue
+    outline with lesion pixels set to tissue), giving five new punch groups,
+    so the seed-42 validation draw becomes 20H, NDX_q, V.
+  - Class weights recomputed (sqrt inverse frequency) on this training split
+    only (configs/class_weights_model2.json). Model 1's weights came from a
+    sample of the whole dataset, dominated by PVcont tiles.
+  - weighted_sampling: false states what DDP training actually does (uniform
+    DistributedSampler); model 1 requested it but it was silently ignored.
+  Unchanged: architecture, tiles, augmentation, optimiser, schedule, loss,
+  early stopping (patience 10 on validation loss), seed.

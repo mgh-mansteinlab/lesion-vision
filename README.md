@@ -1,153 +1,145 @@
 # Lesion Vision
 
-Four-class deep learning pipeline for **segmentation and complete-field morphometry** of ablative fractional laser (AFL) lesions on horizontally sectioned, nitroblue tetrazolium chloride (NBTC)-stained whole-slide images.
+Four-class deep-learning pipeline for **segmentation and complete-field morphometry** of ablative fractional laser (AFL) lesions on horizontally sectioned, nitroblue tetrazolium chloride (NBTC)-stained whole-slide images.
 
-The model is a **UNet** decoder with a **ConvNeXt-Base** encoder (`segmentation-models-pytorch`). It labels background, viable tissue, coagulation, and ablation, then measures every detection: equivalent-circle ablation diameter, median radial coagulation width, lesion diameter, and centroid.
+Each section is segmented into background, viable tissue, coagulation and ablation, and every detected lesion is measured: equivalent-circle ablation diameter, median radial coagulation width (72 rays), total lesion diameter, ablation- and coagulation-zone area, and centroid.
 
 ## Publication
 
-Quadri SA, Marks HL, Wang-Evers M, Manstein D. *Automated histomorphometry of ablative fractional laser lesions enables a complete-field census of geometric heterogeneity.* Scientific Reports (revision).
+Quadri SA, Marks HL, Wang-Evers M, Manstein D. *Automated histomorphometry of ablative fractional laser lesions enables a complete-field census of geometric heterogeneity.* Scientific Reports (in revision).
 
-Code: [github.com/mgh-mansteinlab/lesion-vision](https://github.com/mgh-mansteinlab/lesion-vision)
+If you use this software, please cite the paper when published and this repository (`CITATION.cff`). Human tissue in the associated study was discarded abdominoplasty skin collected under Massachusetts General Hospital IRB #2017P000027.
 
-If you use this software, please cite the paper when it is published, and this repository (`CITATION.cff`).
+## What is in the pipeline
 
-Human tissue in the associated study was discarded abdominoplasty skin collected under Massachusetts General Hospital IRB \#2017P000027.
-
-## Features
-
-- **Four-class segmentation** of AFL histology (background / tissue / coagulation / ablation)
-- **NDPI and TIFF** whole-slide input, including multi-punch NDPI files split into per-sample TIFFs
-- **Joint multi-scale training**: 448×448 and 768×768 tiles, both rescaled to 512×512, with five overlap grids
-- **Punch-disjoint train/val split** so all whole-slide images of a punch stay in one subset (`--split_level punch`; `--split_level slide` for WSI-disjoint)
-- **Complete-field morphometry** on every detection that passes the area filter (not a 10-lesion subsample)
-- **Topology post-processing** to enforce ablation-inside-coagulation
-- **Object-level evaluation**: detection recall/precision and paired Bland–Altman versus expert outlines
-- Single-GPU or multi-GPU (DDP) training; optional Weights & Biases logging
+| Stage | What it does | Code |
+|---|---|---|
+| Scale | Every image is analysed at 0.8832 µm/pixel; NDPI files are read at the pyramid level matching that scale | `src/infer/ndpi.py` |
+| Segmentation models | UNet, UNet++, DeepLabV3+, UPerNet or SegFormer with any `timm`/SMP encoder (`--arch`) | `src/models/` |
+| Training | Joint 448 + 768 px tiles rescaled to 512, compound CE + Dice loss, punch-disjoint split, DDP | `src/train/`, `scripts/train.py` |
+| Probabilities | Whole-section class probabilities with probability-space tile blending | `scripts/predict_probs.py` |
+| Ensemble | Equal-weight mean of member probabilities; members chosen by greedy forward selection on validation | `scripts/analysis/ensemble_probs.py`, `scripts/analysis/greedy_ensemble.py` |
+| Nested decoding | Lesion vs non-lesion, then crater vs cuff, then a ≥10 µm coagulation rim, so every crater is enclosed by coagulation | `scripts/analysis/component_filter.py` |
+| Lesion filter | Removes objects < 80 µm, low-probability objects and small edge objects; thresholds tuned on validation | `scripts/analysis/component_filter.py` |
+| Morphometry | Per-lesion measurements and per-section summaries | `src/analytics/lesions.py` |
+| Evaluation | Pixel metrics with bootstrap CIs, lesion matching, Bland–Altman, depth bands, census | `scripts/analysis/r3_stats.py` |
 
 ## Install
 
-Python 3.10+. OpenSlide is required for NDPI.
+Python 3.10+. OpenSlide is required for NDPI input.
 
 ```bash
 git clone https://github.com/mgh-mansteinlab/lesion-vision.git
 cd lesion-vision
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
 Editable install (optional): `pip install -e ".[dev]"`
 
-## Weights
+## Data and weights
 
-Trained checkpoints are **not** in git (GitHub size limits, and institutional distribution). Request them from the corresponding author and place:
+Imaging data and trained checkpoints are not stored in git; both are available from the corresponding author on reasonable request (`data/DATA_ON_REQUEST.txt`, `models/DATA_ON_REQUEST.txt`). One extracted punch at the analysis scale is included for testing: `data/sample/CCA-1_punch.tif`.
+
+Class ids: `0` background (white), `1` viable tissue (green), `2` coagulation (blue), `3` ablation (red).
+
+The evaluation and analysis scripts read whole sections from `LESION_DATA_ROOT` (default `data/LesionSegmentation`):
 
 ```text
-models/<run_name>/best_model.pth
+$LESION_DATA_ROOT/
+  data/PVcont/{images,masks}/        evaluation punch (35 serial sections)
+  data_val_r3m2/{images,masks}/      validation sections
+  data_tiling_sources/               annotated sources + scale_manifest.csv
+  data_example_series/<series>/images/   unannotated example series
 ```
 
-The manuscript model is ConvNeXt-Base UNet trained jointly on 448 and 768 px tiles. Directory names for the ablation sweep are listed in `models/CHECKPOINT_INDEX.txt`. If `models/single_scale_448/best_model.pth` is present, inference uses it by default; otherwise pass `--model` / `model_path`.
-
-## Sample image
-
-`data/sample/CCA-1_punch.tif` is **one punch extracted from an NDPI** at the paper's analysis scale (OpenSlide level 2, 0.884 µm/pixel, JPEG-TIFF, ~39 MB). Full NDPI files are 200–500 MB and are not stored here; they are available with the imaging dataset on request (`data/DATA_ON_REQUEST.txt`).
-
-## Predict
-
-Requires a checkpoint under `models/` (see Weights).
-
-Python:
+## Predict with one model
 
 ```python
 from src.infer.predictor import LesionPredictor
 
-predictor = LesionPredictor(model_path="models/<run_name>/best_model.pth")
-predictor.save_prediction(
-    "data/sample/CCA-1_punch.tif",
-    "predictions/sample_pred.png",
-    summary_metrics=True,
-    figures=True,
-)
+predictor = LesionPredictor(model_path="models/<run>/best_model.pth")
+predictor.save_prediction("data/sample/CCA-1_punch.tif", "predictions/sample_pred.png",
+                          summary_metrics=True, figures=True)
 ```
 
-CLI (directory of `.tif` / `.ndpi`):
+Directory of `.tif` / `.ndpi` files (NDPI files are split into per-sample TIFFs at the analysis scale automatically):
 
 ```bash
-python scripts/predict.py \
-  --data-dir data/sample \
-  --out-dir predictions/sample \
-  --model models/<run_name>/best_model.pth
+python scripts/predict.py --data-dir data/sample --out-dir predictions/sample --model models/<run>/best_model.pth
 ```
 
-`scripts/predict.py` is an alias for `scripts/predict_directory.py`. Interactive menus: `python scripts/pipeline_cli.py`.
+Outputs per image: `images/` (class mask, overlay, summary), `csv/` (per-lesion table `lesion_summary.csv` and aggregates), `individual_lesions/`.
 
-Outputs per image:
+## Final pipeline (ensemble + nested decoding + lesion filter)
 
-- `images/` — class mask, overlay, visual summary
-- `csv/` — per-lesion table and aggregate metrics
-- `individual_lesions/` — per-lesion crops
+```bash
+# 1. class probabilities from each member model
+python scripts/predict_probs.py --images-only --data-dir <sections> --model models/<member>/checkpoint_epoch_N.pth \
+       --out-dir predictions/<member>/probs --gpus 8
+
+# 2. equal-weight mean of the members
+python scripts/analysis/ensemble_probs.py --out-dir predictions/final/probs predictions/<m1>/probs predictions/<m2>/probs ...
+
+# 3. nested decoding + lesion filter (thresholds from validation), then morphometry
+python scripts/analysis/component_filter.py apply --decode nested --interior-bg \
+       --probs-dir predictions/final/probs --params predictions/r3_greedy/filter_params_nested.json \
+       --out-dir predictions/final/pred
+```
+
+Filter thresholds are tuned with `component_filter.py tune --decode nested --probs-dir <validation probs> --gt-dir <validation masks> --out <params.json>`. `scripts/analysis/greedy_ensemble.py` runs member selection, the decoding choice, filter tuning and the evaluation-punch application end to end.
 
 ## Train
 
-Tiled image/mask pairs under `DATA_DIR`:
+Tiles under `DATA_DIR` (`tile_448/`, `mask_448/`, `tile_768/`, `mask_768/`, each with `no_shift` and `ovlp_20…80` grids; tile and mask names must match; tiling in `src/data/tiling.py`).
 
-```text
-DATA_DIR/
-  tile_448/{no_shift,ovlp_20,ovlp_40,ovlp_60,ovlp_80}/
-  mask_448/{...}/
-  tile_768/{...}/
-  mask_768/{...}/
-```
+Models of the paper, one YAML each:
 
-Tile filenames must match the corresponding masks. Generate tiles with `python utils/TileGen.py` (implementation: `src/data/tiling.py`).
-
-Paper-aligned training (punch-disjoint split, seed 42):
+| Model | Architecture / encoder | Config |
+|---|---|---|
+| M1 (pre-specified) | UNet / ConvNeXt-Base | `configs/experiments/baseline_multi_scale_slide_split.yaml` |
+| M2 | UNet / ConvNeXt-Base, + 14 lesion-free sections | `configs/experiments/r3_model2_hardneg.yaml` |
+| C1 | UPerNet / ConvNeXt-Base | `configs/experiments/r3_c1_upernet_convnextb.yaml` |
+| C2 | SegFormer / MiT-B3 | `configs/experiments/r3_c2_segformer_mitb3.yaml` |
+| C3 | DeepLabV3+ / ResNet-50 | `configs/experiments/r3_c3_deeplabv3plus_resnet50.yaml` |
+| C4 | UNet++ / EfficientNet-B3 | `configs/experiments/r3_c4_unetpp_effb3.yaml` |
 
 ```bash
 export DATA_DIR=/path/to/tiles
-export OUTPUT_DIR=./models
-
-python scripts/train.py \
-  --data_dir "$DATA_DIR" \
-  --output_dir "$OUTPUT_DIR" \
-  --backbone tu-convnext_base \
-  --tile_size 448 768 \
-  --img_size 512 \
-  --epochs 100 \
-  --batch_size 2 \
-  --learning_rate 1e-4 \
-  --loss_type compound \
-  --scheduler_type cosine \
-  --warmup_epochs 5 \
-  --augment \
-  --weighted_sampling \
-  --sampling_alpha 0.85 \
-  --activation_checkpointing \
-  --split_level punch \
-  --holdout_groups PVcont \
-  --seed 42
+WORLD_SIZE=8 python scripts/launch_experiment.py configs/experiments/r3_c2_segformer_mitb3.yaml
 ```
 
-`--split_level punch` keeps every WSI of a punch in the same subset. `--holdout_groups` forces named punches into validation. `--split_level slide` is WSI-disjoint; omit `--split_level` for the legacy tile-path 80/20 split. YAML preset: `configs/experiments/baseline_multi_scale_slide_split.yaml`.
+All use a punch-disjoint split (`split_level: punch`: every slide of a punch series in one subset, seed 42), with the evaluation punch removed from training and validation (`exclude_groups: [PVcont]`). Training resumes from a checkpoint with `--resume <ckpt> --resume_history <train_history.json>`, which keeps the early-stopping state. Class weights are square-root inverse frequency on the training split (`scripts/analysis/compute_class_weights.py`).
 
-Or: `export DATA_DIR=/path/to/tiles && bash scripts/train.sh`
+## Evaluation and paper tables
 
-Class ids: `0` background (white), `1` tissue (green), `2` coagulation (blue), `3` ablation (red). Reported class weights are in `configs/class_weights.json`.
+```bash
+python scripts/r3_eval_model.py --run-dir models/<run> --tag <tag>   # checkpoint + inference setting chosen on validation, then the evaluation punch
+python scripts/analysis/greedy_ensemble.py                          # final pipeline
+python scripts/analysis/r3_example_series.py                        # census of the example series
+python scripts/analysis/r3_cpu_report.py                            # section geometry and pitch
+python scripts/analysis/manual_sampling_sim.py                      # 10-lesion sampling simulation
+python scripts/analysis/r3_glahn_comparison.py                      # comparison with published manual areas
+python scripts/analysis/r3_make_tables.py                           # every table and in-text number
+python scripts/analysis/r3_make_figures.py                          # result figures
+python scripts/analysis/r3_export_source_data.py                    # tables and figure data as CSV
+```
 
 ## Repository layout
 
 | Path | Role |
-|------|------|
-| `src/infer/` | Prediction, NDPI split, tiling/stitch, post-process |
-| `src/train/` | Training loop, DDP, CLI |
-| `src/models/` | SMP UNet / UNet++ wrapper and losses |
-| `src/data/` | Dataset, augmentations, tile generation |
+|---|---|
+| `src/infer/` | Prediction, NDPI reading at the analysis scale, tiling/stitching, post-processing |
+| `src/train/` | Training loop, DDP, early stopping, CLI |
+| `src/models/` | SMP architectures and losses |
+| `src/data/` | Dataset, punch-level split, augmentations, tiling |
 | `src/analytics/` | Lesion morphometry |
 | `src/eval/` | Pixel metrics and lesion matching |
-| `scripts/` | `train.py`, `predict.py`, `pipeline_cli.py`, eval helpers |
-| `configs/experiments/` | Ablation YAML files |
+| `scripts/` | Training, prediction, probability export, per-model evaluation |
+| `scripts/analysis/` | Ensemble, nested decoding, lesion filter, statistics, tables and figures |
+| `configs/experiments/` | Training presets |
+| `experiments/` | Experiment notes |
 | `data/sample/` | Public test punch |
 | `tests/` | Unit tests (`pytest tests/ -v`) |
 

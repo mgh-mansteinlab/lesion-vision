@@ -1,0 +1,35 @@
+{
+  "method": "sqrt_inv_freq",
+  "computed_on": "training split only",
+  "split": {
+    "split_level": "punch",
+    "exclude_groups": [
+      "PVcont"
+    ],
+    "val_split": 0.2,
+    "seed": 42
+  },
+  "n_mask_tiles": 162064,
+  "tile_sizes": [
+    448,
+    768
+  ],
+  "pixel_fraction": {
+    "background": 0.231854,
+    "tissue": 0.728286,
+    "coagulation": 0.029658,
+    "ablation": 0.010203
+  },
+  "weights": [
+    1.7723,
+    1.0,
+    4.9554,
+    8.4487
+  ],
+  "class_names": [
+    "background",
+    "tissue",
+    "coagulation",
+    "ablation"
+  ]
+}

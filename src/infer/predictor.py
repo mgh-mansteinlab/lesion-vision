@@ -102,6 +102,7 @@ class LesionPredictor:
         self.model = LesionSegmentationModel(
             n_classes=config.get('n_classes', 4),
             backbone=config.get('backbone', 'tu-convnext_base'),
+            arch=config.get('arch', 'auto'),
             encoder_weights=config.get('encoder_weights', 'imagenet'),
             learning_rate=config.get('learning_rate', 1e-4),
             input_shape=(3, img_size, img_size),

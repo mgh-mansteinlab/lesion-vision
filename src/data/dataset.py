@@ -173,42 +173,21 @@ class TiledLesionDataset(Dataset):
         # Normalize weights
         class_weights = class_weights / np.sum(class_weights) * self.n_classes
         
-        # Compute weights for all samples
+        # Weight EVERY sample by the rare classes present in its raw mask (no
+        # augmentation). The former approximation scored 1000 random tiles and
+        # multiplied their weights by len/1000, so a few hundred tiles would
+        # have dominated sampling.
+        print(f"Computing sample weights for all {len(self)} samples...")
         weights = np.ones(len(self))
+        for idx, mask_path in enumerate(self.mask_paths):
+            m = cv2.imread(mask_path, cv2.IMREAD_COLOR)  # BGR
+            coag = np.any((m[..., 0] > 200) & (m[..., 1] < 100) & (m[..., 2] < 100))
+            abl = np.any((m[..., 2] > 200) & (m[..., 1] < 100) & (m[..., 0] < 100))
+            if coag:
+                weights[idx] *= 1.0 + alpha * class_weights[2]
+            if abl:
+                weights[idx] *= 1.0 + alpha * class_weights[3]
 
-        # We'll analyze a subset of samples to determine their weights
-        num_to_process = min(len(self), 1000)
-        indices = np.random.choice(len(self), num_to_process, replace=False)
-
-        print(f"Computing sample weights for {num_to_process} samples...")
-
-        for i, idx in enumerate(indices):
-            if i % 100 == 0:
-                print(f"Processing sample {i}/{num_to_process}...")
-
-            _, mask = self[idx]
-            mask_np = mask.numpy()
-
-            # Determine which classes are present in this sample
-            sample_weight = 1.0
-            for c in range(self.n_classes):
-                if np.sum(mask_np == c) > 0:
-                    # Increase weight based on rare classes (ablation and coagulation)
-                    if c >= 2:  # Classes 2 (coagulation) and 3 (ablation) are rare
-                        sample_weight *= (1.0 + alpha * class_weights[c])
-
-            weights[idx] = sample_weight
-
-        # Samples NOT analyzed keep weight 1.0; scale up the analyzed rare-
-        # class samples so the expected number of rare-class draws per epoch
-        # matches an all-samples weighting. This approximates full-dataset
-        # weighting at 1/1000 the IO cost.
-        analyzed_rare = (weights[indices] > 1.0).sum()
-        if analyzed_rare > 0 and num_to_process < len(self):
-            scale = len(self) / num_to_process
-            weights[indices] = np.where(weights[indices] > 1.0,
-                                       weights[indices] * scale, 1.0)
-            
         # Normalize weights
         weights = weights / weights.sum() * len(weights)
         self.sample_weights = weights
@@ -333,25 +312,20 @@ def slide_id_from_tile_path(path):
 
 
 def punch_id_from_tile_path(path):
-    """Recover the punch identifier from a tile path.
+    """Recover the punch (series) identifier from a tile path.
 
-    Slide names are '<punch>_<slide_number>' (e.g. 'PVcont16_02' is slide 2
-    of punch 'PVcont16'), so the punch id is the slide id with a trailing
-    '_<digits>' slide number removed. Falls back to the slide id when the
-    suffix pattern is absent. Grouping by punch keeps all whole-slide
-    images of one punch in the same subset; the punch is the analysis unit
-    and the closest available proxy for the donor.
-
-    Override: the annotated laser-only punch of this tissue bank is one
-    punch whose 32 serial sections are mounted as the WSIs PVcont1_01
-    .. PVcont18_03 (folder report: 'PVcont — laser-only serials of one
-    punch'). All PVcont* slides therefore map to the single punch 'PVcont'.
+    Section ids are '<series><slide>_<serial>': 'PVcont16_02' is serial 2 on
+    glass slide 16 of the PVcont series, 'cvb3_03' serial 3 on slide 3 of the
+    cvb series. All slides of a series are serial sections of one punch, so
+    the punch id drops the '_<serial>' suffix and then the trailing slide
+    number: PVcont16_02 -> PVcont, cvb1_02 and cvb3_03 -> cvb, CPBSV2_01 ->
+    CPBSV, H_03 and H1_03 -> H. Ids with no trailing digits keep their name
+    (20H_02 -> 20H). This errs toward merging: sections whose relationship
+    is unknown share a group, so no punch can contribute to both subsets.
     """
     slide_id = slide_id_from_tile_path(path)
-    if slide_id.startswith('PVcont'):
-        return 'PVcont'
-    m = re.match(r'^(.*)_\d+$', slide_id)
-    return m.group(1) if m else slide_id
+    base = re.sub(r'_\d+$', '', slide_id)
+    return re.sub(r'\d+$', '', base) or base
 
 
 def get_train_val_dataset(
