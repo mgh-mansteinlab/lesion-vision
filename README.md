@@ -22,7 +22,7 @@ If you use this software, please cite the paper when published and this reposito
 | Nested decoding | Lesion vs non-lesion, then crater vs cuff, then a ≥10 µm coagulation rim, so every crater is enclosed by coagulation | `scripts/analysis/component_filter.py` |
 | Lesion filter | Removes objects < 80 µm, low-probability objects and small edge objects; thresholds tuned on validation | `scripts/analysis/component_filter.py` |
 | Morphometry | Per-lesion measurements and per-section summaries | `src/analytics/lesions.py` |
-| Evaluation | Pixel metrics with bootstrap CIs, lesion matching, Bland–Altman, depth bands, census | `scripts/analysis/r3_stats.py` |
+| Evaluation | Pixel metrics and lesion matching | `src/eval/` |
 
 ## Install
 
@@ -40,18 +40,16 @@ Editable install (optional): `pip install -e ".[dev]"`
 
 ## Data and weights
 
-Imaging data and trained checkpoints are not stored in git; both are available from the corresponding author on reasonable request (`data/DATA_ON_REQUEST.txt`, `models/DATA_ON_REQUEST.txt`). One extracted punch at the analysis scale is included for testing: `data/sample/CCA-1_punch.tif`.
+This repository contains code only. Imaging data and trained checkpoints are available from the corresponding author on reasonable request (`data/DATA_ON_REQUEST.txt`, `models/DATA_ON_REQUEST.txt`).
 
 Class ids: `0` background (white), `1` viable tissue (green), `2` coagulation (blue), `3` ablation (red).
 
-The evaluation and analysis scripts read whole sections from `LESION_DATA_ROOT` (default `data/LesionSegmentation`):
+Ensemble selection and filter tuning read whole annotated sections from `LESION_DATA_ROOT` (default `data/LesionSegmentation`):
 
 ```text
 $LESION_DATA_ROOT/
-  data/PVcont/{images,masks}/        evaluation punch (35 serial sections)
-  data_val_r3m2/{images,masks}/      validation sections
-  data_tiling_sources/               annotated sources + scale_manifest.csv
-  data_example_series/<series>/images/   unannotated example series
+  data_val_r3m2/{images,masks}/      validation sections (selection and tuning)
+  data/PVcont/{images,masks}/        held-out evaluation sections
 ```
 
 ## Predict with one model
@@ -60,14 +58,14 @@ $LESION_DATA_ROOT/
 from src.infer.predictor import LesionPredictor
 
 predictor = LesionPredictor(model_path="models/<run>/best_model.pth")
-predictor.save_prediction("data/sample/CCA-1_punch.tif", "predictions/sample_pred.png",
+predictor.save_prediction("path/to/section.tif", "predictions/section_pred.png",
                           summary_metrics=True, figures=True)
 ```
 
 Directory of `.tif` / `.ndpi` files (NDPI files are split into per-sample TIFFs at the analysis scale automatically):
 
 ```bash
-python scripts/predict.py --data-dir data/sample --out-dir predictions/sample --model models/<run>/best_model.pth
+python scripts/predict.py --data-dir path/to/slides --out-dir predictions/run1 --model models/<run>/best_model.pth
 ```
 
 Outputs per image: `images/` (class mask, overlay, summary), `csv/` (per-lesion table `lesion_summary.csv` and aggregates), `individual_lesions/`.
@@ -88,11 +86,11 @@ python scripts/analysis/component_filter.py apply --decode nested --interior-bg 
        --out-dir predictions/final/pred
 ```
 
-Filter thresholds are tuned with `component_filter.py tune --decode nested --probs-dir <validation probs> --gt-dir <validation masks> --out <params.json>`. `scripts/analysis/greedy_ensemble.py` runs member selection, the decoding choice, filter tuning and the evaluation-punch application end to end.
+Filter thresholds are tuned with `component_filter.py tune --decode nested --probs-dir <validation probs> --gt-dir <validation masks> --out <params.json>`. `scripts/analysis/greedy_ensemble.py` runs member selection, the decoding choice, filter tuning and the application to held-out sections end to end.
 
 ## Train
 
-Tiles under `DATA_DIR` (`tile_448/`, `mask_448/`, `tile_768/`, `mask_768/`, each with `no_shift` and `ovlp_20…80` grids; tile and mask names must match; tiling in `src/data/tiling.py`).
+Tiles under `DATA_DIR` (`tile_448/`, `mask_448/`, `tile_768/`, `mask_768/`, each with `no_shift` and `ovlp_20…80` grids; tile and mask names must match; generate them with `python utils/TileGen.py`, implementation in `src/data/tiling.py`).
 
 Models of the paper, one YAML each:
 
@@ -112,20 +110,6 @@ WORLD_SIZE=8 python scripts/launch_experiment.py configs/experiments/r3_c2_segfo
 
 All use a punch-disjoint split (`split_level: punch`: every slide of a punch series in one subset, seed 42), with the evaluation punch removed from training and validation (`exclude_groups: [PVcont]`). Training resumes from a checkpoint with `--resume <ckpt> --resume_history <train_history.json>`, which keeps the early-stopping state. Class weights are square-root inverse frequency on the training split (`scripts/analysis/compute_class_weights.py`).
 
-## Evaluation and paper tables
-
-```bash
-python scripts/r3_eval_model.py --run-dir models/<run> --tag <tag>   # checkpoint + inference setting chosen on validation, then the evaluation punch
-python scripts/analysis/greedy_ensemble.py                          # final pipeline
-python scripts/analysis/r3_example_series.py                        # census of the example series
-python scripts/analysis/r3_cpu_report.py                            # section geometry and pitch
-python scripts/analysis/manual_sampling_sim.py                      # 10-lesion sampling simulation
-python scripts/analysis/r3_glahn_comparison.py                      # comparison with published manual areas
-python scripts/analysis/r3_make_tables.py                           # every table and in-text number
-python scripts/analysis/r3_make_figures.py                          # result figures
-python scripts/analysis/r3_export_source_data.py                    # tables and figure data as CSV
-```
-
 ## Repository layout
 
 | Path | Role |
@@ -133,14 +117,13 @@ python scripts/analysis/r3_export_source_data.py                    # tables and
 | `src/infer/` | Prediction, NDPI reading at the analysis scale, tiling/stitching, post-processing |
 | `src/train/` | Training loop, DDP, early stopping, CLI |
 | `src/models/` | SMP architectures and losses |
-| `src/data/` | Dataset, punch-level split, augmentations, tiling |
+| `src/data/`, `utils/TileGen.py` | Dataset, punch-level split, augmentations, tile generation |
 | `src/analytics/` | Lesion morphometry |
 | `src/eval/` | Pixel metrics and lesion matching |
-| `scripts/` | Training, prediction, probability export, per-model evaluation |
-| `scripts/analysis/` | Ensemble, nested decoding, lesion filter, statistics, tables and figures |
+| `scripts/` | Training, prediction, probability export, interactive CLI |
+| `scripts/analysis/` | Ensemble selection, nested decoding, lesion filter, class weights |
 | `configs/experiments/` | Training presets |
-| `experiments/` | Experiment notes |
-| `data/sample/` | Public test punch |
+| `experiments/README.md` | Description of the training presets |
 | `tests/` | Unit tests (`pytest tests/ -v`) |
 
 ## License

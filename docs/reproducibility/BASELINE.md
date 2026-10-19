@@ -14,7 +14,7 @@ Default training configuration matching the manuscript methods.
 | Punch-disjoint split | `--split_level punch` (`src/data/dataset.py`); preset `configs/experiments/baseline_multi_scale_slide_split.yaml`. `--split_level slide` is also available for WSI-disjoint splitting. |
 | Topology post-process | `src/infer/postprocess.py` (on by default) |
 | Per-lesion morphometry | `src/analytics/lesions.py` |
-| NDPI extraction | `src/infer/ndpi.py` (default OpenSlide level 2) |
+| NDPI extraction | `src/infer/ndpi.py` (pyramid level matching 0.8832 µm/pixel, chosen from the slide metadata) |
 
 ## Default train command
 
@@ -22,7 +22,7 @@ See the README “Train” section, or `bash scripts/train.sh` with `DATA_DIR` s
 
 Record for every run: git commit, `models/<run>/config.json`, and W&B id if used.
 
-Checkpoints and full imaging data are on request (`models/DATA_ON_REQUEST.txt`, `data/DATA_ON_REQUEST.txt`). One extracted punch is in `data/sample/`.
+Checkpoints and full imaging data are on request (`models/DATA_ON_REQUEST.txt`, `data/DATA_ON_REQUEST.txt`).
 
 ## Experiment tracking
 

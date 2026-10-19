@@ -36,7 +36,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(Path(__file__).parent))
-from r3_stats import gt_class_mask  # noqa: E402
+from src.eval.metrics import gt_class_mask  # noqa: E402
 
 UM = 0.8832
 MIN_DIAM, EDGE_SMALL = 80.0, 150.0

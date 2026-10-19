@@ -22,6 +22,32 @@ def rgb_to_class_mask(rgb: np.ndarray) -> np.ndarray:
     return cls
 
 
+
+def gt_class_mask(rgb):
+    """GT class map with anti-aliased boundary pixels resolved.
+
+    The annotation PNGs are anti-aliased: pixels between two classes carry
+    blended colours that rgb_to_class_mask maps to background, giving every
+    lesion a thin false background rim. Pixels that are neither a class colour
+    nor near-white are assigned the majority class of their classified 3x3
+    neighbours, iterated until none remain. Only near-white stays background.
+    """
+    cls = rgb_to_class_mask(rgb)
+    white = np.all(rgb > 240, axis=2)
+    unk = (cls == 0) & ~white
+    k = np.ones((3, 3), np.float32)
+    for _ in range(20):
+        if not unk.any():
+            break
+        known = ~unk
+        counts = np.stack([cv2.filter2D(((cls == c) & known).astype(np.float32), -1, k, borderType=cv2.BORDER_CONSTANT)
+                           for c in range(4)])
+        best = counts.argmax(0).astype(np.uint8)
+        fill = unk & (counts.max(0) > 0)
+        cls[fill] = best[fill]
+        unk &= ~fill
+    return cls
+
 def class_mask_to_rgb(cls: np.ndarray) -> np.ndarray:
     """Convert a class-index mask back to an RGB image for visualisation."""
     return colorize_class_mask(cls)

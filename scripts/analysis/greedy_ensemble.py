@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).parent))
 import component_filter  # noqa: E402
 from component_filter import nested_decode  # noqa: E402
-from r3_stats import gt_class_mask  # noqa: E402
+from src.eval.metrics import gt_class_mask  # noqa: E402
 
 # data location: set LESION_DATA_ROOT, default <repo>/data/LesionSegmentation
 DATA_ROOT = Path(os.environ.get('LESION_DATA_ROOT', Path(__file__).resolve().parents[2] / 'data' / 'LesionSegmentation'))
@@ -110,8 +110,9 @@ def main():
          '--params', params, '--out-dir', OUT / 'PVcont_filtered_nested'] + bgflag)
     run([PY, 'scripts/analysis/component_filter.py', 'apply', '--decode', 'nested', '--raw', '--probs-dir', OUT / 'probs_PVcont',
          '--out-dir', OUT / 'PVcont_nested'] + bgflag)
-    run([PY, 'scripts/analysis/r3_stats.py', '--out', OUT / 'stats_filtered_nested.json',
-         '--pipeline', f'nested={OUT / "PVcont_nested"}', '--pipeline', f'filtered_nested={OUT / "PVcont_filtered_nested"}'])
+    if (ROOT / 'scripts' / 'analysis' / 'r3_stats.py').exists():  # evaluation statistics (analysis code, not part of the pipeline)
+        run([PY, 'scripts/analysis/r3_stats.py', '--out', OUT / 'stats_filtered_nested.json',
+             '--pipeline', f'nested={OUT / "PVcont_nested"}', '--pipeline', f'filtered_nested={OUT / "PVcont_filtered_nested"}'])
     sel['filter'] = json.load(open(params))['chosen']
     json.dump(sel, open(OUT / 'selection.json', 'w'), indent=1)
     print('done', OUT, flush=True)
